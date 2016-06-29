@@ -2,16 +2,23 @@
 '''
 HTTP client to upload acquisition files.
 
-pip install requests
+pip install requests json yaml
 
-http://babun.tissuemaps.org/api/acquisitions/dG1hcHM4Ng==/image_files
-http://babun.tissuemaps.org/api/acquisitions/dG1hcHM4Ng==/metadata_files
+@author: Yauhen Yakimovich
+
+TODO:
+
+- show info about the plates
+- register new plates and acquisitions
+
 
 '''
+from __future__ import print_function
 import os
 import re
+import sys
 import yaml
-import base64
+import json
 import shutil
 import logging
 import argparse
@@ -19,9 +26,18 @@ import urllib
 import requests
 
 
-logger = logging.getLogger(__name__)
+def eprint(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
 
 
+def print_json(data):
+    '''Pretty-print beautiful JSON.'''
+    json.dumps(data, indent=4, sort_keys=True)
+
+
+logger = logging.getLogger(os.path.basename(sys.argv[0]))
+
+# Some "harcoded" default arguments
 BASE_URL = 'http://babun.tissuemaps.org/'
 EXPERIMENT_ID = 'dG1hcHM1OQ=='
 ACQUISITION_ID = 'dG1hcHM4Nw=='
@@ -35,11 +51,39 @@ USER_CREDENTIALS = {
 }
 
 
-def base64url_decode(input):
-    rem = len(input) % 4
-    if rem > 0:
-        input += b'=' * (4 - rem)
-    return base64.urlsafe_b64decode(input)
+class LogConfigurator(object):
+
+    # BASE_LEVEL = logging.CRITICAL
+    BASE_LEVEL = logging.WARNING
+
+    def __init__(self, root=logging.root, root_level=logging.INFO):
+        self.root = root
+        self.root.setLevel(root_level)
+        self.__file_handler = None
+        self.__console_handler = None
+
+    @property
+    def console_handler(self):
+        if self.__console_handler is None:
+            self.__console_handler = logging.StreamHandler()
+        return self.__console_handler
+
+    def set_console_handler(self, verbosity):
+        self.console_handler.setLevel(self.map_verbosity_to_level(verbosity))
+        # if self.root.level < self.console_handler.level:
+        #     self.root.level = self.console_handler.level
+        self.root.level = self.console_handler.level
+        format_str = '%(asctime)s %(name)-30s %(levelname)-8s %(message)s'
+        datefmt_str = '%m-%d %H:%M'
+        self.console_handler.setFormatter(
+            logging.Formatter(format_str, datefmt_str))
+        self.root.addHandler(self.console_handler)
+
+    def map_verbosity_to_level(self, value):
+        '''Verbosity value is just an integer count of v-char in "-vvvv" .. '''
+        value *= 10
+        assert value < logging.CRITICAL
+        return self.BASE_LEVEL - value
 
 
 class TmapsHttpClient(object):
@@ -50,11 +94,11 @@ class TmapsHttpClient(object):
             and base_url.endswith('/')
         self.base_url = base_url
         self.session.get(base_url)
-        self.load_credetials()
+        self.load_credentials()
         self.params = DEFAULT_PARAMS.copy()
         self.params.update(params)
 
-    def load_credetials(self):
+    def load_credentials(self):
         user_credentials = USER_CREDENTIALS
         cred_filepath = os.path.expanduser('~/.tmaps_uploader.yaml')
         if os.path.exists(cred_filepath):
@@ -105,50 +149,150 @@ class TmapsHttpClient(object):
         self.handle_error(res)
         return res.json()['data']
 
-    def _upload_register(self, filename):
+    def _upload_register(self, *filenames):
+        '''
+        Call it either for single file
+
+          _upload_register(filename)
+
+        or multiple args
+
+          _upload_register(file1, file2, ...)
+
+        or as a list
+
+          _upload_register(*filenames)
+
+        '''
+        logger.info('Registering (%d) file(s)' % len(filenames))
         url = self.get_url('/api/acquisitions/' + ACQUISITION_ID +
                            '/upload/register')
-        payload = {'files': [filename]}
+        payload = {'files': filenames}
         res = self.session.put(url, json=payload)
         self.handle_error(res)
         # print res.json()
 
     def _upload_file(self, filepath):
+        logger.info('Uploading: %s' % filepath)
         url = self.get_url('/api/acquisitions/' + ACQUISITION_ID +
                            '/upload/upload-file')
         files = {'file': open(filepath, 'rb')}
         res = self.session.post(url, files=files)
         self.handle_error(res)
-        print res.json()
+        logger.info(str(res.json()))
 
-    def upload_file(self, filepath):
+    def upload_single_file(self, filepath):
         self._upload_register(os.path.basename(filepath))
         self._upload_file(filepath)
 
+    def register_files(self, local_folder):
+        files = [os.path.join(local_folder, filename)
+                 for filename in os.listdir(local_folder)]
+        # Register all files
+        self._upload_register(*files)
+
+    def upload_files(self, local_folder):
+        files = [os.path.join(local_folder, filename)
+                 for filename in os.listdir(local_folder)]
+        # Register all files
+        self._upload_register(*files)
+        # Upload file by file sequentially
+        for filepath in files:
+            # Double registration: file by file..
+            # self.upload_single_file(filepath)
+            # Uncomment this for performance reasons.
+            self._upload_file(filepath)
+
+
+class UploadFilesCli(object):
+
+    def __init__(self):
+        self.args = None
+        self.parse_args()
+        self.setup_logging()
+        self.perform_action()
+
+    def parse_args(self):
+        parser = argparse.ArgumentParser(
+            description='Utility to upload files from the microscope into '
+                        'the website via HTTP.')
+
+        # ACTIONS
+        parser.add_argument('--info', action='store_true',
+                            help='Get information about experiments, '
+                                 'plates and acquisitions.')
+
+        parser.add_argument('--list', action='store_true',
+                            help='List files in particular acquisition.')
+
+        parser.add_argument('--upload', action='store_true',
+                            help='Upload files from the local folder.')
+        # Secondary options
+        parser.add_argument('-u', '--url', default=BASE_URL,
+                            help='URL of the TissueMAPs service, e.g. %s' %
+                            BASE_URL)
+        parser.add_argument('--acq-id', dest='acquisition_id',
+                            default=ACQUISITION_ID,
+                            help='ID of the acquisition. Visible in the url '
+                                 'of the browser.')
+        parser.add_argument('--path', default=LOCAL_ACQ_FILES,
+                            help='Local directory with microscope image and '
+                                 'metadata files to upload')
+        parser.add_argument('-v', '--verbose', dest='console_verbosity',
+                            action='count', default=0)
+
+        self.args = parser.parse_args()
+
+    def setup_logging(self):
+        self.log_config = LogConfigurator()
+        self.log_config.set_console_handler(self.args.console_verbosity)
+
+    def perform_action(self):
+        if self.args.info:
+            self.show_info()
+        elif self.args.list:
+            self.list_files()
+        elif self.args.upload:
+            self.upload_files()
+        else:
+            print('Nothing to do. See %s --help' %
+                  os.path.basename(sys.argv[0]))
+            exit(1)
+
+    def show_info(self):
+        '''Getting info experiments, plates and acquisitions.'''
+        logger.info(self.show_info.__doc__)
+        client = TmapsHttpClient(base_url=self.args.url)
+        client.login()
+        raise NotImplementedError()
+
+    def list_files(self):
+        '''List files in particular acquisition.'''
+        logger.info(self.list_files.__doc__)
+        client = TmapsHttpClient(base_url=self.args.url)
+        client.login()
+        image_files = client.get_image_files()
+        print('Listing in total (%d) of registered files..' % len(image_files))
+        for image_file in image_files:
+            print('| %s \t| %s |' % (image_file['name'],
+                                     image_file['upload_status']))
+
     def upload_files(self):
-        for filename in os.listdir(LOCAL_ACQ_FILES):
-            filepath = os.path.join(LOCAL_ACQ_FILES, filename)
-            print 'Uploading: %s' % filepath
-            client.upload_file(filepath)
-
-
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description='Utility to upload files from the microscope into '
-                    'the website via HTTP.')
-
-    parser.add_argument('-u', '--url', default=BASE_URL,
-                        help='URL of the TissueMAPs service, e.g. %s' %
-                        BASE_URL)
-    parser.add_argument('path',
-                        help='Local directory with microscope image and '
-                        'metadata files to upload')
-    return parser.parse_args()
+        '''Upload files from the local folder.'''
+        logger.info(self.upload_files.__doc__)
+        client = TmapsHttpClient(base_url=self.args.url)
+        client.login()
+        if not self.args.path:
+            eprint('Error. Missing path to local folder with images. '
+                   'Have you forgot to specify `--path` ?')
+            exit(1)
+        if not os.path.exists(self.args.path) \
+                or not os.path.isdir(self.args.path):
+            eprint('Error. Bad path to folder with images: %s' %
+                   self.args.path)
+            exit(1)
+        client.upload_files(self.args.path)
 
 
 if __name__ == '__main__':
-    args = parse_args()
-    client = TmapsHttpClient(base_url=args.url)
-    client.login()
-    image_files = client.get_image_files()
-    print image_files
+    UploadFilesCli()

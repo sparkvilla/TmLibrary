@@ -11,6 +11,12 @@ TODO:
 - show info about the plates
 - register new plates and acquisitions
 
+USAGE:
+
+List files in acquisition:
+
+    `./uploadfiles --list --acq-id=dG1hcHM4OQ==`
+
 
 '''
 from __future__ import print_function
@@ -88,11 +94,12 @@ class LogConfigurator(object):
 
 class TmapsHttpClient(object):
 
-    def __init__(self, base_url, params={}):
+    def __init__(self, base_url, acquisition_id, params={}):
         self.session = requests.Session()
         assert base_url.startswith('http') \
             and base_url.endswith('/')
         self.base_url = base_url
+        self.acquisition_id = acquisition_id
         self.session.get(base_url)
         self.load_credentials()
         self.params = DEFAULT_PARAMS.copy()
@@ -136,14 +143,14 @@ class TmapsHttpClient(object):
                                     self._access_token})
 
     def get_image_files(self):
-        url = self.get_url('/api/acquisitions/' + ACQUISITION_ID +
+        url = self.get_url('/api/acquisitions/' + self.acquisition_id +
                            '/image_files')
         res = self.session.get(url)
         self.handle_error(res)
         return res.json()['data']
 
     def get_metadata_files(self):
-        url = self.get_url('/api/acquisitions/' + ACQUISITION_ID +
+        url = self.get_url('/api/acquisitions/' + self.acquisition_id +
                            '/metadata_files')
         res = self.session.get(url)
         self.handle_error(res)
@@ -165,16 +172,16 @@ class TmapsHttpClient(object):
 
         '''
         logger.info('Registering (%d) file(s)' % len(filenames))
-        url = self.get_url('/api/acquisitions/' + ACQUISITION_ID +
+        url = self.get_url('/api/acquisitions/' + self.acquisition_id +
                            '/upload/register')
-        payload = {'files': filenames}
+        payload = {'files': [os.path.basename(fname) for fname in filenames]}
         res = self.session.put(url, json=payload)
         self.handle_error(res)
         # print res.json()
 
     def _upload_file(self, filepath):
         logger.info('Uploading: %s' % filepath)
-        url = self.get_url('/api/acquisitions/' + ACQUISITION_ID +
+        url = self.get_url('/api/acquisitions/' + self.acquisition_id +
                            '/upload/upload-file')
         files = {'file': open(filepath, 'rb')}
         res = self.session.post(url, files=files)
@@ -262,14 +269,18 @@ class UploadFilesCli(object):
     def show_info(self):
         '''Getting info experiments, plates and acquisitions.'''
         logger.info(self.show_info.__doc__)
-        client = TmapsHttpClient(base_url=self.args.url)
+        client = TmapsHttpClient(base_url=self.args.url,
+                                 acquisition_id=self.args.acquisition_id)
         client.login()
         raise NotImplementedError()
 
     def list_files(self):
         '''List files in particular acquisition.'''
         logger.info(self.list_files.__doc__)
-        client = TmapsHttpClient(base_url=self.args.url)
+        if self.args.acquisition_id == ACQUISITION_ID:
+            logger.warn('Using default acquisition_id: %s' % ACQUISITION_ID)
+        client = TmapsHttpClient(base_url=self.args.url,
+                                 acquisition_id=self.args.acquisition_id)
         client.login()
         image_files = client.get_image_files()
         print('Listing in total (%d) of registered files..' % len(image_files))
@@ -280,7 +291,8 @@ class UploadFilesCli(object):
     def upload_files(self):
         '''Upload files from the local folder.'''
         logger.info(self.upload_files.__doc__)
-        client = TmapsHttpClient(base_url=self.args.url)
+        client = TmapsHttpClient(base_url=self.args.url,
+                                 acquisition_id=self.args.acquisition_id)
         client.login()
         if not self.args.path:
             eprint('Error. Missing path to local folder with images. '

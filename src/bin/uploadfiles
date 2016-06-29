@@ -125,20 +125,30 @@ class TmapsHttpClient(object):
         self._upload_register(os.path.basename(filepath))
         self._upload_file(filepath)
 
+    def upload_files(self):
+        for filename in os.listdir(LOCAL_ACQ_FILES):
+            filepath = os.path.join(LOCAL_ACQ_FILES, filename)
+            print 'Uploading: %s' % filepath
+            client.upload_file(filepath)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description='Utility to upload files from the microscope into '
+                    'the website via HTTP.')
+
+    parser.add_argument('-u', '--url', default=BASE_URL,
+                        help='URL of the TissueMAPs service, e.g. %s' %
+                        BASE_URL)
+    parser.add_argument('path',
+                        help='Local directory with microscope image and '
+                        'metadata files to upload')
+    return parser.parse_args()
+
+
 if __name__ == '__main__':
-    # parser = argparse.ArgumentParser(
-        # description='Utility to upload files from the microscope into '
-                    # 'the website via HTTP.')
-    # parser.add_argument(
-    #     'yaml', help=('The path to the YAML file that holds the '
-    #                   'encoded records'))
-    # args = parser.parse_args()
-    client = TmapsHttpClient(BASE_URL)
+    args = parse_args()
+    client = TmapsHttpClient(base_url=args.url)
     client.login()
-    # image_files = client.get_image_files()
-    # print image_files
-    for filename in os.listdir(LOCAL_ACQ_FILES):
-        filepath = os.path.join(LOCAL_ACQ_FILES, filename)
-        print 'Uploading: %s' % filepath
-        client.upload_file(filepath)
-        # exit()
+    image_files = client.get_image_files()
+    print image_files

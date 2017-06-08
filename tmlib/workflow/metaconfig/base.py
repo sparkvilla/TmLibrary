@@ -283,10 +283,18 @@ class MetadataHandler(object):
                 well = plate.Well[w]
                 n_samples = len(well.Sample)
                 for s in xrange(n_samples):
+                    well_name = str(w)
+                    well_pos_y = w.Sample[s].PositionY
+                    well_pos_x = w.Sample[s].PositionX
                     image_index = well.Sample[s].ImageRef
                     for p in xrange(n_planes):
                         index = image_index + image_index * (n_planes - 1) + p
-                        self.metadata.at[index, 'well_name'] = str(w)
+                        self.metadata.at[index, 'well_name'] = well_name
+                        if well_pos_y is not None and well_pos_x is not None:
+                            self.metadata.at[index, 'well_position_y'] = \
+                                int(well_pos_y)
+                            self.metadata.at[index, 'well_position_x'] = \
+                                int(well_pos_x)
 
         return self.metadata
 
@@ -460,12 +468,22 @@ class MetadataHandler(object):
         return self.metadata
 
     @staticmethod
-    def _calculate_coordinates(positions, n):
+    def _calculate_well_positions(positions, n):
         return stitch.calc_grid_coordinates_from_positions(positions, n)
+
+    @property
+    def has_well_positions(self):
+        '''bool: ``True`` if well positions are available and ``False``
+        otherwise
+        '''
+        return not(
+            np.any(self.metadata.well_position_y.isnull()) or
+            np.any(self.metadata.well_position_x.isnull())
+        )
 
     def determine_grid_coordinates_from_stage_positions(self):
         '''Determines the coordinates of each image acquisition site within the
-        continuous acquisition grid (slide or well in a plate)
+        continuous acquisition grid (well in a plate)
         based on the absolute microscope stage positions.
 
         Returns
@@ -476,36 +494,40 @@ class MetadataHandler(object):
         Raises
         ------
         MetadataError
-            when stage position information is not available from `metadata`
+            when position information is not available from `metadata`
 
         See also
         --------
         :func:`illuminati.stitch.calc_grid_coordinates_from_positions`
         '''
         md = self.metadata
-        if (any(md.stage_position_y.isnull()) or
-                any(md.stage_position_x.isnull())):
-                raise MetadataError(
-                    'Stage position information is not available.'
-                )
+
+        has_absolute_stage_positions = not(
+            np.any(md.stage_position_y.isnull()) or
+            np.any(md.stage_position_x.isnull())
+        )
+        if not has_absolute_stage_positions:
+            raise MetadataError(
+                'Stage position information is not available.'
+            )
 
         logger.info(
             'translate absolute microscope stage positions into '
             'relative acquisition grid coordinates'
         )
-
         planes_per_well = md.groupby(['well_name'])
         n_tpoints = len(np.unique(md.tpoint))
         n_channels = len(np.unique(md.channel_name))
         n_zplanes = len(np.unique(md.zplane))
         for well_name in np.unique(md.well_name):
+            logger.info('calculate grid coordinates for well "%s"', well_name)
             ix = planes_per_well.groups[well_name]
             positions = zip(
                 md.loc[ix, 'stage_position_y'],
                 md.loc[ix, 'stage_position_x']
             )
             n = len(positions) / (n_tpoints * n_channels * n_zplanes)
-            coordinates = self._calculate_coordinates(positions, n)
+            coordinates = self._calculate_well_positions(positions, n)
             md.loc[ix, 'well_position_y'] = [c[0] for c in coordinates]
             md.loc[ix, 'well_position_x'] = [c[1] for c in coordinates]
 

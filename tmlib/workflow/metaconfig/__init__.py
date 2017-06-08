@@ -67,7 +67,7 @@ __logo__ = '''
 
 
 SUPPORTED_MICROSCOPE_TYPES = {
-    'visiview', 'cellvoyager', 'metamorph'
+    'visiview', 'cellvoyager', 'metamorph', 'gliberaloverview'
 }
 
 

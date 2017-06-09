@@ -483,10 +483,16 @@ class MetadataHandler(object):
         '''bool: ``True`` if well positions are available and ``False``
         otherwise
         '''
-        return not(
-            np.any(self.metadata.well_position_y.isnull()) or
-            np.any(self.metadata.well_position_x.isnull())
-        )
+        has_well_pos = False
+        if len(self._omexml.plates) > 0:
+            p = self._omexml.plates[0]
+            if len(p.Well) > 0:
+                w = p.Well[0]
+                if len(w.Sample) > 0:
+                    s = w.Sample[0]
+                    if s.PositionX is not None and s.PositionY is not None:
+                        has_well_pos = True
+        return has_well_pos
 
     def determine_grid_coordinates_from_stage_positions(self):
         '''Determines the coordinates of each image acquisition site within the

@@ -284,8 +284,8 @@ class MetadataHandler(object):
                 n_samples = len(well.Sample)
                 for s in xrange(n_samples):
                     well_name = str(w)
-                    well_pos_y = w.Sample[s].PositionY
-                    well_pos_x = w.Sample[s].PositionX
+                    well_pos_y = well.Sample[s].PositionY
+                    well_pos_x = well.Sample[s].PositionX
                     image_index = well.Sample[s].ImageRef
                     for p in xrange(n_planes):
                         index = image_index + image_index * (n_planes - 1) + p

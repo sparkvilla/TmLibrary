@@ -209,7 +209,7 @@ class CellvoyagerMetadataReader(MetadataReader):
                 well_samples.new(index=i)
                 well_samples[i].ImageRef = ref
                 name = microscope_image_filenames[ref]
-                e = mlf_root.xpath('//*[contains(text(), "%s")]' % name)
+                e = mlf_root.xpath('//*[contains(text(), "%s")]' % name)[0]
                 # Newer software versions also write the relative coordinates
                 # of well samples to the metadata file.
                 if '{%s}TileYIndex' % mlf_ns in e.attrib:

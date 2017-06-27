@@ -397,6 +397,7 @@ class PyramidBuilder(WorkflowStepAPI):
                 image_store[file.id] = image
 
                 extra_file_map = layer.map_base_tile_to_images(file.site)
+                channel_layer_tiles = list()
                 for t in tiles:
                     level = batch['level']
                     row = t['y']
@@ -484,13 +485,18 @@ class PyramidBuilder(WorkflowStepAPI):
                                 'Tile shouldn\'t be in this batch!'
                             )
 
-                    with tm.utils.ExperimentConnection(exp_id) as connection:
-                        channel_layer_tile = tm.ChannelLayerTile(
-                            channel_layer_id=layer.id,
-                            z=level, y=row, x=column, pixels=tile
-                        )
-                        tm.ChannelLayerTile.add(connection, channel_layer_tile)
+                    channel_layer_tile = tm.ChannelLayerTile(
+                        channel_layer_id=layer.id,
+                        z=level, y=row, x=column, pixels=tile
+                    )
+                    if assume_clean_state:
+                        channel_layer_tiles.append(channel_layer_tile)
+                    else:
+                        with tm.utils.ExperimentConnection(exp_id) as c:
+                            tm.ChannelLayerTile.add(c, channel_layer_tile)
 
+                with tm.utils.ExperimentConnection(exp_id) as c:
+                    tm.ChannelLayerTile.add_multiple(c, channel_layer_tiles)
 
     def _create_lower_zoom_level_tiles(self, batch, assume_clean_state):
         exp_id = self.experiment_id
@@ -502,7 +508,9 @@ class PyramidBuilder(WorkflowStepAPI):
             layer_id = layer.id
             zoom_factor = layer.zoom_factor
 
-            for coordinates in batch['coordinates']:
+            partitions = create_partitions(batch['coordinates'], 10)
+            channel_layer_tiles = list()
+            for coordinates in partitions:
                 row = coordinates[0]
                 column = coordinates[1]
                 pre_coordinates = layer.calc_coordinates_of_next_higher_level(
@@ -561,15 +569,22 @@ class PyramidBuilder(WorkflowStepAPI):
                             mosaic_img = row_img
                         else:
                             mosaic_img = mosaic_img.join(row_img, 'y')
-                    # Create the tile at the current level by downsampling
-                    # the mosaic image, which is composed of the 4 tiles
-                    # of the next higher zoom level
-                    tile = PyramidTile(mosaic_img.shrink(zoom_factor).array)
-                    channel_layer_tile = tm.ChannelLayerTile(
-                        channel_layer_id=layer_id,
-                        z=level, y=row, x=column, pixels=tile
-                    )
-                    tm.ChannelLayerTile.add(connection, channel_layer_tile)
+                # Create the tile at the current level by downsampling
+                # the mosaic image, which is composed of the 4 tiles
+                # of the next higher zoom level
+                tile = PyramidTile(mosaic_img.shrink(zoom_factor).array)
+                channel_layer_tile = tm.ChannelLayerTile(
+                    channel_layer_id=layer_id,
+                    z=level, y=row, x=column, pixels=tile
+                )
+                if assume_clean_state:
+                    channel_layer_tiles.append(channel_layer_tile)
+                else:
+                    with tm.utils.ExperimentConnection(exp_id) as c:
+                        tm.ChannelLayerTile.add(c, channel_layer_tile)
+
+            with tm.utils.ExperimentConnection(exp_id) as c:
+                tm.ChannelLayerTile.add_multiple(c, channel_layer_tiles)
 
     def run_job(self, batch, assume_clean_state=False):
         '''Creates 8-bit grayscale JPEG layer tiles.

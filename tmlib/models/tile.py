@@ -123,7 +123,7 @@ class ChannelLayerTile(ExperimentModel):
 
     @classmethod
     def add(cls, connection, tile):
-        '''Adds a new tile.
+        '''Adds a new object.
 
         Parameters
         ----------
@@ -150,6 +150,36 @@ class ChannelLayerTile(ExperimentModel):
             'z': tile.z, 'y': tile.y, 'x': tile.x,
             'pixels': psycopg2.Binary(tile._pixels.tostring())
         })
+
+    @classmethod
+    def add_multiple(cls, connection, tiles):
+        '''Adds multiple objects at once.
+
+        Parameters
+        ----------
+        connection: psycopg2.extras.NamedTupleCursor
+            experiment-specific database connection created via
+            :class:`ExperimentConnection <tmlib.models.utils.ExperimentConnection>`
+        tiles: List[tmlib.models.tile.ChannelLayerTile]
+
+        Warning
+        -------
+        This does not update existing tiles and will raise an error in case
+        a tile already exists in the database.
+        '''
+        # TODO: Figure out how to COPY BYTEA correctly as binary and then
+        # group tiles by "y" (the distribution key) and COPY them en bulk.
+        for tile in tiles:
+            connection.execute('''
+                INSERT INTO channel_layer_tiles AS t (
+                    channel_layer_id, z, y, x, pixels
+                )
+                VALUES (%(channel_layer_id)s, %(z)s, %(y)s, %(x)s, %(pixels)s)
+            ''', {
+                'channel_layer_id': tile.channel_layer_id,
+                'z': tile.z, 'y': tile.y, 'x': tile.x,
+                'pixels': psycopg2.Binary(tile._pixels.tostring())
+            })
 
     def __repr__(self):
         return '<%s(z=%r, y=%r, x=%r, channel_layer_id=%r)>' % (

@@ -56,10 +56,10 @@ class _CliMeta(ABCMeta):
 
     '''Metaclass that provides classes command line interface functionality.
     Generated classes behave as abstract base classes and need to be
-    implemented for each workflow step. When the generated class has the
-    attribute ``__abstract__`` set to ``True`` no command line functionality
-    will be added to this class. Derived classes will, however, be automatically
-    equipped with this functionality.
+    implemented for each workflow step. When the attribute ``__abstract__``
+    is set to ``True`` in the generated class, no command line functionality
+    will be added to this class. Classes derived from an abstract base class
+    will be automatically equipped with this functionality.
 
     '''
 
@@ -84,13 +84,20 @@ class _CliMeta(ABCMeta):
             '--verbosity', '-v', action='count', default=0,
             help='increase logging verbosity'
         )
-        # Extra arguments are added to the main parser as well because they
-        # also need to be parssed to the constructor of the API class.
+
         step_name = cls.__name__.lower()
+        api = get_step_api(step_name)
+        if not api.__unique__:
+            # In case a step occur more than once, the positition of the step
+            # in the workflow needs to be specified.
+            parser.add_argument(
+                '--ordinal', '-o', type=int, required=True,
+                help='position of the step in the workflow'
+            )
+
         BatchArgs, SubmissionArgs = get_step_args(step_name)
         subparsers = parser.add_subparsers(dest='method', help='methods')
         subparsers.required = True
-        # flags = collections.defaultdict(list)
         for attr_name in dir(cls):
             if attr_name.startswith('__'):
                 continue
@@ -106,16 +113,14 @@ class _CliMeta(ABCMeta):
                     method_parser.description = attr_value.help
                     for arg in attr_value.args.iterargs():
                         arg.add_to_argparser(method_parser)
-                        # if arg.flag is not None:
-                        #     flags[attr_name].append(arg.flag)
-                        # if arg.short_flag is not None:
-                        #     flags[attr_name].append(arg.short_flag)
+
         # The "init" and "submit" methods require additional arguments
         # that also need to be accessible outside the scope of the
         # command line interface. Therefore, they are handled separately.
         # Each workflow step must implement BatchArguments and
-        # SubmissionArguments and register them using the batch_args and
-        # submission_args decorator, respectively.
+        # SubmissionArguments and register them using the
+        # "register_step_batch_args" and
+        # "register_step_submission_args" decorator, respectively.
         # These arguments are added to the corresponding method-specific
         # subparser as a separate group to highlight that they represent a
         # different type of argument.
@@ -123,20 +128,15 @@ class _CliMeta(ABCMeta):
         def add_step_specific_method_args(step_name, method_name, args_class):
             method_parser = subparsers.choices[method_name]
             parser_group = method_parser.add_argument_group(
-                    'step-specific arguments'
+                'step-specific arguments'
             )
             for arg in args_class.iterargs():
                 arg.add_to_argparser(parser_group)
-                # if arg.flag is not None:
-                #     flags[attr_name].append(arg.flag)
-                # if arg.short_flag is not None:
-                #     flags[attr_name].append(arg.short_flag)
 
         add_step_specific_method_args(step_name, 'init', BatchArgs)
         setattr(cls, '_batch_args_class', BatchArgs)
         add_step_specific_method_args(step_name, 'submit', SubmissionArgs)
         setattr(cls, '_submission_args_class', SubmissionArgs)
-        api = get_step_api(step_name)
         setattr(cls, '_api_class', api)
         setattr(cls, '_parser', parser)
 
@@ -213,7 +213,7 @@ class WorkflowStepCLI(WorkflowSubmissionManager):
 
     @property
     def name(self):
-        '''str: name of the step (command line program)'''
+        '''str: name of the program'''
         return self.__class__.__name__.lower()
 
     @classmethod

@@ -58,7 +58,9 @@ class ImageAnalysisPipelineEngine(WorkflowStepAPI):
 
     '''Class for running image analysis pipelines.'''
 
-    def __init__(self, experiment_id, pipeline_description=None,
+    __unique__ = False
+
+    def __init__(self, experiment_id, ordinal, pipeline_description=None,
             handles_descriptions=None):
         '''
         Parameters
@@ -76,7 +78,7 @@ class ImageAnalysisPipelineEngine(WorkflowStepAPI):
         If `pipe` or `handles` are not provided
         they are obtained from the persisted YAML descriptor files on disk.
         '''
-        super(ImageAnalysisPipelineEngine, self).__init__(experiment_id)
+        super(ImageAnalysisPipelineEngine, self).__init__(experiment_id, ordinal)
         self._engines = {'Python': None, 'R': None}
         self.project = Project(
             location=self.step_location,
@@ -375,7 +377,7 @@ class ImageAnalysisPipelineEngine(WorkflowStepAPI):
 
     def _build_debug_run_command(self, site_id, verbosity):
         logger.debug('build "debug" command')
-        command = [self.step_name]
+        command = [self._program_name]
         command.extend(['-v' for x in range(verbosity)])
         command.append(self.experiment_id)
         command.extend(['debug', '--site', str(site_id), '--plot'])

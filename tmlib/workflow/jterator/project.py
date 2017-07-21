@@ -376,8 +376,8 @@ class Project(object):
 
     def save(self):
         '''Saves a Jterator project:
-        Updates the content of *pipeline* and *handles* files on disk
-        according to modifications to the pipeline and module descriptions.
+        Creates *pipeline* and *handles* files or updates their content in case
+        they already exist.
         '''
         if not os.path.exists(self.location):
             raise PipelineOSError(
@@ -389,16 +389,16 @@ class Project(object):
     def create(self, skel_dir=None):
         '''Creates a Jterator project:
         Creates an empty "handles" subfolder as well as a skeleton pipeline
-        file, i.e. a pipeline descriptor file with all required main keys but
-        an empty module list. When `skel_dir` is provided, *pipeline* and
-        *handles* files are copied.
+        file, i.e. a pipeline descriptor file with an empty module list.
+        When `skel_dir` is provided, existing *pipeline* and *handles* files
+        are copied.
 
         Parameters
         ----------
         skel_dir: str, optional
             path to repository directory that represents a project skeleton,
-            i.e. contains a *pipeline* and one or more *handles* files in a
-            *handles* directory.
+            i.e. contains a *pipeline* file and and a *handles* subfolder with
+            zero or more *handles* files
         '''
         if skel_dir:
             skel_dir = os.path.expandvars(skel_dir)
@@ -421,12 +421,8 @@ class Project(object):
 
     def remove(self):
         '''Removes a Jterator project.'''
-        # remove_pipe_file(self.location, self.pipe['name'])
-        # remove_handles_folder(self.location)
         if not os.path.exists(self.location):
-            raise PipelineOSError(
-                'Project does not exist: %s' % self.location
-            )
+            raise PipelineOSError('Project does not exist: %s' % self.location)
         shutil.rmtree(self.location)
 
 

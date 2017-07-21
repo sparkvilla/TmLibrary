@@ -47,40 +47,11 @@ class Jterator(WorkflowStepCLI):
         jtmodules_logger = logging.getLogger('jtmodules')
         jtmodules_logger.setLevel(level)
 
-    @climethod(
-        help='creates a new project on disk',
-        repo_dir=Argument(
-            type=str, help='path to local copy of jtlib repository'
-        ),
-        skel_dir=Argument(
-            type=str,
-            help='path to a directory that should serve as a project skeleton'
-        )
-    )
-    def create(self, repo_dir, skel_dir):
+    @climethod(help='creates a new project on disk')
+    def create(self):
         self._print_logo()
         logger.info('create project: %s' % self.api_instance.step_location)
-        self.api_instance.project.create(repo_dir, skel_dir)
-
-    @climethod(
-        help='runs an invidiual job on the local machine',
-        job_id=Argument(
-            type=int, help='ID of the job that should be run',
-            flag='job', short_flag='j'
-        ),
-        assume_clean_state=Argument(
-            type=bool,
-            help='assume that previous outputs have been cleaned up',
-            flag='assume-clean-state', default=False
-        )
-    )
-    def run(self, job_id, assume_clean_state):
-        self._print_logo()
-        api = self.api_instance
-        logger.info('get batch for job #%d', job_id)
-        batch = api.get_run_batch(job_id)
-        logger.info('run job #%d' % job_id)
-        api.run_job(batch, assume_clean_state)
+        self.api_instance.project.create()
 
     @climethod(
         help='runs an invidiual site on the local machine for debugging',
@@ -112,4 +83,3 @@ class Jterator(WorkflowStepCLI):
         self._print_logo()
         logger.info('check pipe and handle descriptor files')
         self.api_instance.check_pipeline()
-

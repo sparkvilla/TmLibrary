@@ -73,9 +73,6 @@ The *workflow* structure, i.e. the sequence of *stages* and *steps* and their
 interdependencies, is defined by its *type*, which is determined based on an
 implementation of
 :class:`WorkflowDependencies <tmlib.workflow.dependencies.WorkflowDependencies>`.
-To make a *type* available for use, the derived class must be
-registered via
-:func:`register_workflow_type <tmlib.workflow.register_workflow_type>`.
 As an example serves the "canonical" type declared by
 :class:`CanonicalWorkflowDependencies <tmlib.workflow.canonical.CanonicalWorkflowDependencies>`.
 
@@ -126,38 +123,6 @@ def register_step_api(name):
                 '"tmlib.workflow.api.WorkflowStepAPI"'
             )
         _step_register[name]['api'] = cls
-        return cls
-    return decorator
-
-
-def register_workflow_type(name):
-    '''Class decorator to register a derived class of
-    :class:`WorkflowDependencies <tmlib.workflow.dependencies.WorkflowDependencies>`.
-
-    Parameters
-    ----------
-    name: str
-        name of the type of workflow
-
-    Returns
-    -------
-    classobj
-
-    Raises
-    ------
-    TypeError
-        when decorated class is not derived from
-        :class:`WorkflowDependencies <tmlib.workflow.dependencies.WorkflowDependencies>`
-    '''
-    from tmlib.workflow.dependencies import WorkflowDependencies
-    def decorator(cls):
-        if WorkflowDependencies not in inspect.getmro(cls):
-            raise TypeError(
-                'Registered class must be derived from '
-                '"tmlib.workflow.dependencies.WorkflowDependencies"'
-            )
-        cls.type = name
-        _workflow_register[name] = cls
         return cls
     return decorator
 

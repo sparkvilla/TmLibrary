@@ -101,6 +101,9 @@ class WorkflowStep(AbortOnError, SequentialTaskCollection, State):
             :class:`WorkflowStage <tmlib.workflow.workflow.WorkflowPhase>`
         description: tmlib.tmaps.description.WorkflowStepDescription
             description of the step
+        ordinal: int, optional
+            position of the step in the workflow relative to other
+            instances of the same step
 
         See also
         --------
@@ -111,6 +114,7 @@ class WorkflowStep(AbortOnError, SequentialTaskCollection, State):
         self.name = name
         self.experiment_id = experiment_id
         self.verbosity = verbosity
+        self.ordinal = ordinal
         self.submission_id = submission_id
         self.user_name = user_name
         self.parent_id = parent_id
@@ -214,7 +218,10 @@ class WorkflowStep(AbortOnError, SequentialTaskCollection, State):
     def _api_instance(self):
         logger.debug('load API for step "%s"', self.name)
         API = get_step_api(self.name)
-        return API(self.experiment_id)
+        kwargs = {'experiment_id': self.experiment_id}
+        if self.ordinal is not None:
+            kwargs.update({'ordinal': self.ordinal})
+        return API(**kwargs)
 
     def _create_init_phase(self):
         '''Creates the job collection for "init" phase.'''

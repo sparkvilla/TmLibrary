@@ -89,8 +89,10 @@ class CanonicalWorkflowDependencies(WorkflowDependencies):
 
     #: List[str]: names of workflow stages
     STAGES = [
-        'image_conversion', 'image_preprocessing',
-        'pyramid_creation', 'image_analysis'
+        'image_conversion',
+        'image_preprocessing',
+        'pyramid_creation',
+        'image_analysis'
     ]
 
     #: Dict[str, str]: mode for each workflow stage, i.e. whether setps of a stage
@@ -183,9 +185,6 @@ def get_workflow_type_information():
     Set[str]
         names of workflow types
 
-    See also
-    --------
-    :func:`tmlib.workflow.register_workflow_type`
     '''
     return set(_workflow_register.keys())
 

@@ -113,6 +113,9 @@ class _ApiMeta(ABCMeta):
         super(_ApiMeta, cls).__init__(clsname, bases, attrs)
         if '__abstract__' in vars(cls).keys():
             return
+        if '__unique__' not in vars(cls).keys():
+            # Steps are unique by default.
+            cls.__unique__ = True
         collect_method = getattr(cls, 'collect_job_output')
         if getattr(collect_method, 'is_implemented', True):
             has_collect_phase = True
@@ -144,23 +147,26 @@ class WorkflowStepAPI(BasicWorkflowStepAPI):
 
     __abstract__ = True
 
-    def __init__(self, experiment_id):
+    def __init__(self, experiment_id, ordinal=None):
         '''
         Parameters
         ----------
         experiment_id: int
             ID of the processed experiment
+        ordinal: int, optional
+            position of the step in the workflow relative to other
+            instances of the same step
+            (only relevant if ``__unique__`` is ``False``)
 
-        Attributes
-        ----------
-        experiment_id: int
-            ID of the processed experiment
-        workflow_location: str
-            absolute path to location where workflow related data should be
-            stored
         '''
         super(WorkflowStepAPI, self).__init__()
         self.experiment_id = experiment_id
+        if not self.__class__.__unique__:
+            if ordinal <= 0:
+                raise ValueError(
+                    'Argument "ordinal" must be an unsigned integer.'
+                )
+        self.ordinal = ordinal
         with tm.utils.ExperimentSession(experiment_id) as session:
             experiment = session.query(tm.Experiment).get(self.experiment_id)
             if experiment is None:
@@ -170,9 +176,18 @@ class WorkflowStepAPI(BasicWorkflowStepAPI):
             self.workflow_location = experiment.workflow_location
 
     @property
-    def step_name(self):
-        '''str: name of the step'''
+    def _program_name(self):
         return self.__module__.split('.')[-2]
+
+    @property
+    def step_name(self):
+        '''str: name of the step instance'''
+        if not self.__class__.__unique__:
+            return '{name}-{ordinal}'.format(
+                name=self._program_name, ordinal=self.ordinal
+            )
+        else:
+            return self._program_name
 
     @staticmethod
     def _create_batches(li, n):
@@ -267,13 +282,13 @@ class WorkflowStepAPI(BasicWorkflowStepAPI):
     def _build_batch_filename_for_run_job(self, job_id):
         return os.path.join(
             self.batches_location,
-            '%s_run_%.7d.batch.json' % (self.step_name, job_id)
+            '%s_run_%.7d.batch.json' % (self._program_name, job_id)
         )
 
     def _build_batch_filename_for_collect_job(self):
         return os.path.join(
             self.batches_location,
-            '%s_collect.batch.json' % self.step_name
+            '%s_collect.batch.json' % self._program_name
         )
 
     def get_run_batch(self, job_id):
@@ -351,8 +366,10 @@ class WorkflowStepAPI(BasicWorkflowStepAPI):
 
     def _build_init_command(self, batch_args, verbosity):
         logger.debug('build "init" command')
-        command = [self.step_name]
+        command = [self._program_name]
         command.extend(['-v' for x in range(verbosity)])
+        if not self.__class__.__unique__:
+            command.extend(['-o', str(self.ordinal)])
         command.append(self.experiment_id)
         command.append('init')
         for arg in batch_args.iterargs():
@@ -366,18 +383,22 @@ class WorkflowStepAPI(BasicWorkflowStepAPI):
                     command.extend(['--%s' % arg.flag, str(value)])
         return command
 
-    def _build_run_command(self, job_id, verbosity):
+    def _build_run_command(self, job_id, verbosity, **extra_args):
         logger.debug('build "run" command')
-        command = [self.step_name]
+        command = [self._program_name]
         command.extend(['-v' for x in range(verbosity)])
+        if not self.__class__.__unique__:
+            command.extend(['-o', str(self.ordinal)])
         command.append(self.experiment_id)
         command.extend(['run', '--job', str(job_id), '--assume-clean-state'])
         return command
 
-    def _build_collect_command(self, verbosity):
+    def _build_collect_command(self, verbosity, **extra_args):
         logger.debug('build "collect" command')
-        command = [self.step_name]
+        command = [self._program_name]
         command.extend(['-v' for x in range(verbosity)])
+        if not self.__class__.__unique__:
+            command.extend(['-o', str(self.ordinal)])
         command.append(self.experiment_id)
         command.extend(['collect'])
         return command

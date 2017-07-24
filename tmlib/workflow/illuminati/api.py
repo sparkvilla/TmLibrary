@@ -613,8 +613,8 @@ class PyramidBuilder(WorkflowStepAPI):
                     name, cls.__name__
                 )
                 mapobject_type = session.get_or_create(
-                    tm.MapobjectType, name=name,
-                    experiment_id=self.experiment_id, ref_type=cls.__name__
+                    tm.MapobjectType, name=name, static=True,
+                    experiment_id=self.experiment_id, ref_model=cls.__name__
                 )
                 mapobject_type_id = mapobject_type.id
                 segmentation_layer = session.get_or_create(

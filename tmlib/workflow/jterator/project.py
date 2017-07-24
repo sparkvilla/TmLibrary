@@ -296,7 +296,8 @@ class Project(object):
         pipe = {
             'input': {
                 'channels': list(),
-                'objects': list()
+                'objects': list(),
+                'roi': ''
             },
             'pipeline': list(),
             'output': {

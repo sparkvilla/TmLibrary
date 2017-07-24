@@ -166,17 +166,21 @@ class PipelineInputDescription(object):
 
     '''Input of a *jterator* pipeline.'''
 
-    __slots__ = ('_channels', '_objects')
+    __slots__ = ('_channels', '_objects', '_roi')
 
-    def __init__(self, channels=[], objects=[]):
+    def __init__(self, roi, channels=[], objects=[]):
         '''
         Parameters
         ----------
+        roi: str
+            regions of interest over which the program will iterate, e.g.
+            "Wells" or "Sites"
         channels: List[dict], optional
             description of channels input
         objects: List[dict], optional
             description of objects input
         '''
+        self.roi = roi
         self.channels = self._create_channel_descriptions(channels)
         self.objects = self._create_object_descriptions(objects)
 
@@ -213,6 +217,22 @@ class PipelineInputDescription(object):
             obj = PipelineObjectInputDescription(**v)
             descriptions.append(obj)
         return descriptions
+
+    @property
+    def roi(self):
+        '''str: name of a mapobject type that defines the region of interest
+        in images that should be analysed by the pipeline
+        '''
+        # Mapobject types defined by "objects" key must be contained by "roi".
+        return self._roi
+
+    @roi.setter
+    def roi(self, value):
+        if not isinstance(value, basestring):
+            raise TypeError(
+                'Value of "roi" in "input" section must be a string.'
+            )
+        self._roi = str(value)
 
     @property
     def channels(self):
@@ -260,6 +280,7 @@ class PipelineInputDescription(object):
         dict
         '''
         attrs = dict()
+        attrs['roi'] = self.roi
         attrs['objects'] = [o.to_dict() for o in self.objects]
         attrs['channels'] = [c.to_dict() for c in self.channels]
         return attrs
@@ -334,7 +355,7 @@ class PipelineChannelInputDescription(object):
     available to the pipeline.
     '''
 
-    __slots__ = ('_name', '_correct')
+    __slots__ = ('_name', '_correct', 'id')
 
     def __init__(self, name, correct=True):
         '''
@@ -387,7 +408,7 @@ class PipelineObjectInputDescription(object):
     should be made available to the pipeline.
     '''
 
-    __slots__ = ('name', )
+    __slots__ = ('name', 'id')
 
     def __init__(self, name):
         '''

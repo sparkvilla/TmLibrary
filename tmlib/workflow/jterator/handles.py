@@ -478,42 +478,6 @@ class SegmentedObjects(LabelImage):
             for label, geometry in img.extract_polygons(y_offset, x_offset):
                 yield (t, z, label, geometry)
 
-    def add_polygons(self, polygons, y_offset, x_offset, dimensions):
-        '''Creates a label image representation of segmented objects based
-        on global map coordinates of object contours.
-
-        Parameters
-        ----------
-        polygons: List[List[Tuple[Union[int, shapely.geometry.polygon.Polygon]]]]
-            label and polygon geometry for segmented objects at each z-plane
-            and time point
-        y_offset: int
-            global vertical offset that needs to be subtracted from
-            y-coordinates
-        x_offset: int
-            global horizontal offset that needs to be subtracted from
-            x-coordinates
-        dimensions: Tuple[int]
-            *y*, *x* dimensions of image pixel planes
-
-        Returns
-        -------
-        numpy.ndarray[numpy.int32]
-            label image
-        '''
-        zstacks = list()
-        for poly in polygons:
-            zplanes = list()
-            for p in poly:
-                image = SegmentationImage.create_from_polygons(
-                    p, y_offset, x_offset, dimensions
-                )
-                zplanes.append(image.array)
-            array = np.stack(zplanes, axis=-1)
-            zstacks.append(array)
-        self.value = np.stack(zstacks, axis=-1)
-        return self.value
-
     @property
     def is_border(self):
         '''Dict[Tuple[int], pandas.Series[bool]]: ``True`` if object lies

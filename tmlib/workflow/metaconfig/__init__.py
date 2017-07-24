@@ -52,9 +52,8 @@ __dependencies__ = {'metaextract'}
 __fullname__ = 'Configuration of image metadata'
 
 __description__ = (
-    'Configuration of extracted OMEXML metadata '
-    'and integration with additional microscope-specific information about '
-    'the image acquisition process.'
+    'Configures extracted OMEXML metadata and complements it with additional '
+    'microscope-specific information about the image acquisition process.'
 )
 
 __logo__ = '''

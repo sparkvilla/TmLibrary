@@ -33,9 +33,9 @@ __dependencies__ = {'imextract'}
 __fullname__ = 'Align images between acquisitions'
 
 __description__ = (
-    'Registration of images acquired in different multiplexing '
-    'cycles relative to a reference cycle. The calculated shifts can then '
-    'subsequently be used to align images.'
+    'Registers images acquired in different multiplexing cycles relative to a '
+    ' reference cycle. The calculated shifts can subsequently be used to align '
+    'images between cycles.'
 )
 
 __logo__ = u'''

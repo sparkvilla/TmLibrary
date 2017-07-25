@@ -70,7 +70,7 @@ class MapobjectType(ExperimentModel, IdMixIn):
     #: str: name of another model class that serves as a reference for
     #: "static" mapobject types, for which geometric representations are
     #: pre-defined by the experiment layout (e.g. "Plates" or "Wells")
-    ref_model = Column(String(50), index=True)
+    ref_model = Column(String(50), unique=True, index=True)
 
     #: int: ID of a mapobject type by which mapobjects are partitioned,
     #: i.e. distributed across shards (defaults to itself if not specified)

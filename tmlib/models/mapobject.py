@@ -68,14 +68,16 @@ class MapobjectType(ExperimentModel, IdMixIn):
     name = Column(String(50), index=True, nullable=False)
 
     #: str: name of another model class that serves as a reference for
-    #: "static" mapobject types and will be used for partitioning mapobjects,
-    #: i.e. distributing mapobjects across shards.
+    #: "static" mapobject types, for which geometric representations are
+    #: pre-defined by the experiment layout (e.g. "Plates" or "Wells")
     ref_model = Column(String(50), index=True)
 
-    #: bool: whether the mapobjects are "static", i.e. have a fixed position
-    #: that are pre-defined by the experiment layout (e.g. "Plates" or "Wells") 
-    #: and indedendent of time point.
-    static = Column(Boolean, index=True)
+    #: int: ID of a mapobject type by which mapobjects are partitioned,
+    #: i.e. distributed across shards (defaults to itself if not specified)
+    partitioned_by = Column(
+        Integer, index=True,
+        server_default=text("currval('mapobject_types_id_seq')")
+    )
 
     #: int: ID of parent experiment
     experiment_id = Column(
@@ -90,8 +92,7 @@ class MapobjectType(ExperimentModel, IdMixIn):
         backref=backref('mapobject_types', cascade='all, delete-orphan')
     )
 
-    def __init__(self, name, experiment_id, partition_type_id=None,
-            ref_model=None):
+    def __init__(self, name, experiment_id, partitioned_by=None, ref_model=None):
         '''
         Parameters
         ----------
@@ -100,79 +101,25 @@ class MapobjectType(ExperimentModel, IdMixIn):
         experiment_id: int
             ID of the parent
             :class:`Experiment <tmlib.models.experiment.Experiment>`
-        partition_type_id: str
-            name of another mapobject type used for partitioning mapobjects
+        partitioned_by: int
+            ID of mapobject type used for mapobject partitioning
         ref_model: str, optional
             name of a reference model class (default: ``None``)
         '''
         self.name = name
-        if ref_model is None and partition_key is None:
-            raise ValueError(
-                'Argument "partition_key" must be specified when "ref_model" '
-                'is not specified.'
-            )
         if ref_model is not None:
             supported_ref_models = {'Site', 'Well', 'Plate'}
             if ref_model not in supported_ref_models:
                 raise ValueError(
                     'Value of argument "ref_model" must be either "%s"' %
-                    '". "'.join(supported_ref_models)
+                    '", "'.join(supported_ref_models)
                 )
-        self.ref_model = ref_model
-        self.partition_type_id = partition_type_id
+            self.ref_model = ref_model
+        if partitioned_by is not None:
+            # Don't set the attribute in case no value is provided to use the
+            # server side default.
+            self.partition_by = partitioned_by
         self.experiment_id = experiment_id
-
-    @classmethod
-    def delete_cascade(cls, connection, static=None):
-        '''Deletes all instances as well as "children"
-        instances of :class:`Mapobject <tmlib.models.mapobject.Mapobject>`,
-        :class:`MapobjectSegmentation <tmlib.models.mapobject.MapobjectSegmentation>`,
-        :class:`Feature <tmlib.models.feature.Feature>`,
-        :class:`FeatureValues <tmlib.models.feature.FeatureValues>`,
-        :class:`ToolResult <tmlib.models.result.ToolResult>`,
-        :class:`LabelLayer <tmlib.models.layer.LabelLayer>` and
-        :class:`LabelValues <tmlib.models.feature.LabelValues>`.
-
-        Parameters
-        ----------
-        connection: tmlib.models.utils.ExperimentConnection
-            experiment-specific database connection
-        static: bool, optional
-            if ``True`` static types ("Plates", "Wells", "Sites") will be
-            deleted, if ``False`` non-static types will be delted, if ``None``
-            all types will be deleted (default: ``None``)
-
-        '''
-        ids = list()
-        if static is not None:
-            if static:
-                logger.debug('delete static mapobjects')
-                connection.execute('''
-                    SELECT id FROM mapobject_types
-                    WHERE name IN ('Plates', 'Wells', 'Sites')
-                ''')
-            else:
-                logger.debug('delete static mapobjects')
-                connection.execute('''
-                    SELECT id FROM mapobject_types
-                    WHERE name NOT IN ('Plates', 'Wells', 'Sites')
-                ''')
-        else:
-            connection.execute('''
-                    SELECT id FROM mapobject_types
-            ''')
-        records = connection.fetchall()
-        ids.extend([r.id for r in records])
-
-        for id in ids:
-            logger.debug('delete mapobjects of type %d', id)
-            Mapobject.delete_cascade(connection, id)
-            logger.debug('delete mapobject type %d', id)
-            connection.execute('''
-                DELETE FROM mapobject_types WHERE id = %(id)s;
-            ''', {
-                'id': id
-            })
 
     def get_site_geometry(self, site_id):
         '''Gets the geometric representation of a
@@ -436,11 +383,9 @@ class Mapobject(DistributedExperimentModel):
 
     id = Column(BigInteger, unique=True, autoincrement=True)
 
-    #: int: ID of another record to which the object is related.
-    #: This could refer to another mapobject in the same table, e.g. in order
-    #: to track proliferating cells, or a record in another reference table,
-    #: e.g. to identify the corresponding record of a "Well".
-    ref_id = Column(BigInteger, index=True)
+    #: int: ID of another record to which the object is related, for example
+    #: for lineage tracing.
+    ref_id = Column(Integer, index=True)
 
     #: int: ID of parent mapobject type
     mapobject_type_id = Column(Integer, index=True, nullable=False)
@@ -455,7 +400,7 @@ class Mapobject(DistributedExperimentModel):
             ID of parent
             :class:`MapobjectType <tmlib.models.mapobject.MapobjectType>`
         ref_id: int, optional
-            ID of the referenced record
+            ID of an instance of a reference model class
 
         See also
         --------
@@ -587,7 +532,6 @@ class Mapobject(DistributedExperimentModel):
     def _add(cls, connection, instance):
         if not isinstance(instance, cls):
             raise TypeError('Object must have type %s' % cls.__name__)
-        instance.id = cls.get_unique_ids(connection, 1)[0]
         connection.execute('''
             INSERT INTO mapobjects (
                 partition_key, id, mapobject_type_id, ref_id
@@ -601,7 +545,6 @@ class Mapobject(DistributedExperimentModel):
             'mapobject_type_id': instance.mapobject_type_id,
             'ref_id': instance.ref_id
         })
-        return instance
 
     @classmethod
     def _bulk_ingest(cls, connection, instances):
@@ -609,11 +552,9 @@ class Mapobject(DistributedExperimentModel):
             return []
         f = StringIO()
         w = csv.writer(f, delimiter=';')
-        ids = cls.get_unique_ids(connection, len(instances))
         for i, obj in enumerate(instances):
             if not isinstance(obj, cls):
-                raise TypeError('Object must have type %s' % cls.__name__)
-            obj.id = ids[i]
+                raise TypeError('All objects must have type %s' % cls.__name__)
             w.writerow((
                 obj.partition_key, obj.id, obj.mapobject_type_id, obj.ref_id
             ))
@@ -623,7 +564,6 @@ class Mapobject(DistributedExperimentModel):
             f, cls.__table__.name, sep=';', columns=columns, null=''
         )
         f.close()
-        return instances
 
     def __repr__(self):
         return '<%s(id=%r, mapobject_type_id=%r)>' % (

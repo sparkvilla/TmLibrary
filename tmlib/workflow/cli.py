@@ -88,8 +88,8 @@ class _CliMeta(ABCMeta):
         step_name = cls.__name__.lower()
         api = get_step_api(step_name)
         if not api.__unique__:
-            # In case a step occur more than once, the positition of the step
-            # in the workflow needs to be specified.
+            # In case a step can occur more than once, its positition in
+            # workflow needs to be specified.
             parser.add_argument(
                 '--ordinal', '-o', type=int, required=True,
                 help='position of the step in the workflow'

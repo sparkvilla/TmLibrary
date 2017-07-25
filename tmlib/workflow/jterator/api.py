@@ -189,9 +189,7 @@ class ImageAnalysisPipelineEngine(WorkflowStepAPI):
         generator
             job descriptions
         '''
-        channel_names = [
-            ch.name for ch in self.project.pipe.description.input.channels
-        ]
+        roi_name = self.project.pipe.description.roi
 
         if args.plot and args.batch_size != 1:
             raise JobDescriptionError(
@@ -199,23 +197,19 @@ class ImageAnalysisPipelineEngine(WorkflowStepAPI):
             )
 
         with tm.utils.ExperimentSession(self.experiment_id) as session:
-            # Distribute sites randomly. Thereby we achieve a certain level
-            # of load balancing in case wells have different number of cells,
-            # for example.
-            sites = session.query(tm.Site.id).order_by(func.random()).all()
-            site_ids = [s.id for s in sites]
-            batches = self._create_batches(site_ids, args.batch_size)
+            roi_mapobject_type = session.query(tm.MapobjectType.id).\
+                filter_by(name=roi_name).\
+                one()
+            roi_mapobjects = session.query(tm.Mapobject.id).\
+                filter_by(mapobject_type_id=roi_mapobject_type.id).\
+                order_by(func.random()).\
+                all()
+            roi_ids = [m.id for m in roi_mapobjects]
+            batches = self._create_batches(roi_ids, args.batch_size)
             for j, batch in enumerate(batches):
-                image_file_locations = session.query(
-                        tm.ChannelImageFile._location
-                    ).\
-                    join(tm.Channel).\
-                    filter(tm.Channel.name.in_(channel_names)).\
-                    filter(tm.ChannelImageFile.site_id.in_(batch)).\
-                    all()
                 yield {
                     'id': j + 1,  # job IDs are one-based!
-                    'site_ids': batch,
+                    'roi_ids': batch,
                     'plot': args.plot
                 }
 
@@ -243,54 +237,94 @@ class ImageAnalysisPipelineEngine(WorkflowStepAPI):
                     filter_by(mapobject_type_id=mapobject_type.id).\
                     delete()
 
-    def _load_pipeline_input(self, roi_id):
+    def _load_pipeline_input(self, roi_id, site_ids):
         logger.info('load pipeline inputs')
         # Use an in-memory store for pipeline data and only insert outputs
         # into the database once the whole pipeline has completed successfully.
         store = {
-            'site_id': site_id,
+            'roi_id': roi_id,
             'pipe': dict(),
             'current_figure': list(),
             'objects': dict(),
             'channels': list()
         }
 
-        # Load the images, correct them if requested and align them if required.
-        # NOTE: When the experiment was acquired in "multiplexing" mode,
-        # images will be automatically aligned, assuming that this is the
-        # desired behavior.
+        # Load input defined in the "input" section of the pipeline description:
+        # 1. Load channel images and correct them if requested.
+        # 2. Load mapobject geometries and build segmentation images.
+        # Channel and segmentation images will be automatically aligned.
         channel_input = self.project.pipe.description.input.channels
         objects_input = self.project.pipe.description.input.objects
+        # The region of interest (ROI) can be any already existing mapobject
+        # type. Images are created from sites that intersect with the region.
         roi_name = self.project.pipe.description.input.roi
         with tm.utils.ExperimentSession(self.experiment_id) as session:
-            roi_mapobject_type = session.query(tm.MapobjectType).\
-                filter_by(name=roi_name).\
-                one()
+            # NOTE: These two queries needs to run on all shards, because we
+            # don't know the partitio_key to restrict it to a single shard or
+            # a few shards. This is create quite some overhead on the
+            # database coordinator node in case multiple jobs run in parallel.
             roi_mapobject_segmentation = session.query(
                     tm.MapobjectSegmentation
                 ).\
                 filter_by(mapobject_id==roi_id).\
                 one()
-
-            # Identify sites that intersect with the region of interest.
+            # Identify sites that intersect with the bounding box of
+            # the region. The bounding box is used to make sure that the
+            # resulting pixel region is continuous.
             site_mapobject_type = session.query(tm.MapobjectType).\
-                filter_by(ref_model=tm.Site.__name__, static=True).\
+                filter_by(ref_model=tm.Site.__name__).\
                 one()
             site_mapobjects = session.query(tm.Mapobject).\
                 join(tm.MapobjectSegmentation).\
                 filter(
                     tm.MapobjectSegmentation.geom_polygon.ST_Intersect(
-                        roi_mapobject_segmentation.geom_polygon
+                        roi_mapobject_segmentation.geom_polygon.ST_Envelope()
                     ),
                     tm.Mapobject.mapobject_type_id == site_mapobject_type.id
                 ).\
                 all()
-            site_ids = [m.partition_key for m in site_mapobjects]
+            site_ids = [m.ref_id for m in site_mapobjects]
 
-            # Determine the size of the region of interest.
-            roi_model_cls = getattr(tm, roi_mapobject_type.ref_model)
-            roi_height, roi_width = roi_model_cls.image_size
+            # Determine the dimensions of the region (all sites that intersect
+            # with the region) along the y and x axis.
+            sites = session.query(tm.Site).\
+                filter(tm.Site.id.in_(site_ids)).\
+                order_by(tm.Site.y, tm.Site.x).\
+                all()
+            # We assume (unaligned) sites all have the same dimensions.
+            site_height, site_width = sites[0].image_size
+            # We need to figure out how the sites need to be arranged along
+            # y and x axes, which will be the 1st and 2nd dimensions of the
+            # multi-dimensional image array, respectively.
+            site_coordinates = np.array([(s.y, s.x) for s in sites])
+            roi_site_offset = np.min(site_coordinates, axis=0)
+            roi_extent = (
+                np.max(site_coordinates, axis=0) -
+                np.min(site_coordinates, axis=0) + 1
+            )
+            roi_height = site_height * roi_extent[0]
+            roi_weidth = site_width * roi_extent[1]
+            # Since we sorted the sites (see above), the first site is the
+            # upper left corner of the ROI and thus the offset of this site
+            # is also the offset of the ROI.
+            roi_y_offset, roi_x_offset = sites[0].offset
 
+            # Determine the number of time points and z positions, which will
+            # be 3rd and/or 4th dimension of the image array, respectively.
+            records = session.query(tm.ChannelImageFile.tpoint).\
+                filter_by(site_id=site_ids[0]).\
+                group_by(tm.ChannelImageFile.tpoint).\
+                all()
+            tpoints = [r.tpoint for r in records]
+            n_tpoints = len(tpoints)
+            records = session.query(tm.ChannelImageFile.zplane).\
+                filter_by(site_id=site_ids[0]).\
+                group_by(tm.ChannelImageFile.zplane).\
+                all()
+            zplanes = [r.zplane for r in records]
+            n_zplanes = len(zplanes)
+
+            # Pre-allocate arrays for channel and segmentation images.
             illumstats = dict()
             for ch in channel_input:
                 channel = session.query(tm.Channel).\
@@ -322,34 +356,18 @@ class ImageAnalysisPipelineEngine(WorkflowStepAPI):
                 else:
                     illumstats[channel.id] = None
 
-            for obj in object_inputs:
-                store['pipe'][obj.name] = (
-                    (roi_height, roi_width, n_zplanes, n_tpoints), dtype
-                )
-
-            # We assume that time points and z-planes are the same between sites.
-            records = session.query(tm.ChannelImageFile.tpoint).\
-                filter_by(site_id=site_ids[0]).\
-                distinct()
-            tpoints = [r.tpoint for r in records]
-            n_tpoints = len(tpoints)
-            records = session.query(tm.ChannelImageFile.zplane).\
-                filter_by(site_id=site_ids[0]).\
-                distinct()
-            zplanes = [r.zplane for r in records]
-            n_zplanes = len(zplanes)
-
             for sid in site_ids:
+                # Channel images are loaded for each site and the pixels are
+                # inserted into the ROI after correction for illumination
+                # artifacts and alignment.
                 site = session.query(tm.Site).get(sid)
-
-                y_offset, x_offset = site.offset
-                height = site.height
-                width = site.width
-
+                y, x = np.array((site.y, site.x)) - roi_site_offset
+                y_offset = y * site_height
+                x_offset = x * site_width
                 for ch in channel_input:
                     logger.info('load images for channel %d', ch.id)
                     image_files = session.query(tm.ChannelImageFile).\
-                        filter_by(site_id=site.id, channel_id=ch.id).\
+                        filter_by(site_id=sid, channel_id=ch.id).\
                         all()
                     for f in image_files:
                         logger.info('load channel image %d', f.id)
@@ -360,33 +378,57 @@ class ImageAnalysisPipelineEngine(WorkflowStepAPI):
                         logger.debug('align channel image %d', f.id)
                         img.align(crop=False)  # shifted, but not cropped!
                         store['pipe'][ch.name][
-                            y_offset:y_offset+height, x_offset:x_offset+width,
+                            y_offset:y_offset+site_height,
+                            x_offset:x_offset+site_width,
                             f.zplane, f.tpoint
                         ] = img.array
 
-                for obj in objects_input:
-                    mapobject_type = session.query(tm.MapobjectType).\
-                        filter_by(name=obj.name).\
-                        one()
-                    for t in sorted(tpoints):
-                        for z in sorted(zplanes):
-                            # TODO: objects may not be contained by a site
-                            # and distributed by 
-                            polygons = mapobject_type.get_segmentations(
-                                partition_key=site.id, tpoint=t, zplane=z
+            for obj in objects_input:
+                # Segmentation images are generated for the entire ROI by
+                # loading all mapobject segmentations that intersect with the
+                # ROI and then drawing the contours into the array to
+                # (re)construct the label image.
+                mapobject_type = session.query(tm.MapobjectType).\
+                    filter_by(name=obj.name).\
+                    one()
+                obj.id = mapobject_type.id
+                store['pipe'][obj.name] = (
+                    (roi_height, roi_width, n_zplanes, n_tpoints), dtype
+                )
+                for t in sorted(tpoints):
+                    for z in sorted(zplanes):
+                        layer = session.query(tm.SegmentationLayer).\
+                            filter_by(
+                                mapobject_type_id=obj.id, zplane=z, tpoint=t
+                            ).\
+                            one()
+                        polygons = session.query(
+                                tm.MapobjectSegmentation.label,
+                                tm.MapobjectSegmentation.geom_polygon
+                            ).\
+                            filter(
+                                tm.MapobjectSegmentation.geom_centroid.ST_Intersect(
+                                    roi_mapobject_segmentation.geom_polygon
+                                ),
+                                tm.MapobjectSegmentation.layer_id == layer.id,
+                                tm.MapobjectSegmentation.partition_key == roi_id
+                            ).\
+                            all()
+                        if not polygons:
+                            logger.warn(
+                                'no polygons found at time point %d and '
+                                'z-position %d', t, z
                             )
+                        else:
                             img = SegmentationImage.create_from_polygons(
-                                polygons, y_offset, x_offset, (height, width)
+                                polygons, roi_y_offset, roi_x_offset,
+                                (roi_height, roi_width)
                             )
-                            store['pipe'][obj.name][
-                                y_offset:y_offset+height,
-                                x_offset:x_offset+width,
-                                z, t
-                            ] = img.array
+                            store['pipe'][obj.name][:, :, z, t] = img.array
 
-                    segm_obj = SegmentedObjects(obj.name, obj.name)
-                    segm_obj.value = np.squeeze(store['pipe'][obj.name])
-                    store['objects'][segm_obj.name] = segm_obj
+                segm_obj = SegmentedObjects(obj.name, obj.name)
+                segm_obj.value = np.squeeze(store['pipe'][obj.name])
+                store['objects'][segm_obj.name] = segm_obj
 
         # Remove single-dimensions from image arrays.
         # NOTE: It would be more consistent to preserve shape, but most people
@@ -456,10 +498,10 @@ class ImageAnalysisPipelineEngine(WorkflowStepAPI):
                     logger.info('objects of type "%s" are not saved', obj_name)
                     continue
                 logger.debug('add object type "%s"', obj_name)
+                # Segmented objects are distributed 
                 mapobject_type = session.get_or_create(
                     tm.MapobjectType, experiment_id=self.experiment_id,
-                    name=obj_name, ref_model=roi_mapobject_type.ref_model,
-                    static=False
+                    name=obj_name, partitioned_by=roi_mapobject_type.id,
                 )
                 mapobject_type_ids[obj_name] = mapobject_type.id
                 # Create a feature values entry for each segmented object at
@@ -502,30 +544,30 @@ class ImageAnalysisPipelineEngine(WorkflowStepAPI):
                         session.query(tm.Mapobject).\
                             filter_by(
                                 mapobject_type_id=mapobject_type_ids[obj_name],
-                                partition_key=store['site_id']
+                                partition_key=store['roi_id']
                             ).\
                             delete()
 
                 # Create a mapobject for each segmented object, i.e. each
                 # pixel component having a unique label.
                 logger.info('add objects of type "%s"', obj_name)
-                # TODO: Can we avoid these multiple loops?
-                # Is the bottleneck inserting objects into the db or Python?
-                mapobjects = [
-                    tm.Mapobject(
-                        partition_key=store['site_id'],
-                        mapobject_type_id=mapobject_type_ids[obj_name]
-                    )
-                    for _ in segm_objs.labels
-                ]
-                logger.info('insert objects into database')
-                # FIXME: does this update the id attribute?
-                session.bulk_ingest(mapobjects)
-                session.flush()
+                mapobject_ids = session.get_unique_ids(
+                    tm.Mapobject, len(segm_objs.labels)
+                )
                 mapobject_ids = {
-                    label: mapobjects[i].id
+                    label: mapobject_ids[i]
                     for i, label in enumerate(segm_objs.labels)
                 }
+                mapobjects = list()
+                for mid in mapobject_ids.values():
+                    m = tm.Mapobject(
+                        partition_key=store['roi_id'],
+                        mapobject_type_id=mapobject_type_ids[obj_name]
+                    )
+                    m.id = mid
+                    mapobjects.append(m)
+                logger.info('insert objects into database')
+                session.bulk_ingest(mapobjects)
 
                 # Create a polygon and/or point for each segmented object
                 # based on the cooridinates of their contours and centroids,
@@ -553,7 +595,7 @@ class ImageAnalysisPipelineEngine(WorkflowStepAPI):
                             continue
                         mapobject_segmentations.append(
                             tm.MapobjectSegmentation(
-                                partition_key=store['site_id'], label=label,
+                                partition_key=store['roi_id'], label=label,
                                 geom_polygon=polygon,
                                 geom_centroid=polygon.centroid,
                                 mapobject_id=mapobject_ids[label],
@@ -572,7 +614,7 @@ class ImageAnalysisPipelineEngine(WorkflowStepAPI):
                         )
                         mapobject_segmentations.append(
                             tm.MapobjectSegmentation(
-                                partition_key=store['site_id'], label=label,
+                                partition_key=store['roi_id'], label=label,
                                 geom_polygon=None, geom_centroid=centroid,
                                 mapobject_id=mapobject_ids[label],
                                 segmentation_layer_id=segmentation_layer_ids[
@@ -610,7 +652,7 @@ class ImageAnalysisPipelineEngine(WorkflowStepAPI):
                         )
                         feature_values.append(
                             tm.FeatureValues(
-                                partition_key=store['site_id'],
+                                partition_key=store['roi_id'],
                                 mapobject_id=mapobject_ids[label],
                                 tpoint=t, values=values
                             )
@@ -675,9 +717,9 @@ class ImageAnalysisPipelineEngine(WorkflowStepAPI):
         for b in batches:
             job = DebugRunJob(
                 step_name=self.step_name,
-                arguments=self._build_debug_run_command(b['site_id'], verbosity),
+                arguments=self._build_debug_run_command(b['roi_id'], verbosity),
                 output_dir=self.log_location,
-                job_id=b['site_id'],
+                job_id=b['roi_id'],
                 submission_id=job_collection.submission_id,
                 parent_id=job_collection.persistent_id,
                 user_name=user_name
@@ -721,10 +763,10 @@ class ImageAnalysisPipelineEngine(WorkflowStepAPI):
 
         # Enable debugging of pipelines by providing the full path to images.
         # This requires a work around for "plot" and "job_id" arguments.
-        for site_id in batch['site_ids']:
-            logger.info('process site %d', site_id)
-            store = self._load_pipeline_input(site_id)
-            store = self._run_pipeline(store, site_id, batch['plot'])
+        for roi_id in batch['roi_ids']:
+            logger.info('process region %d', roi_id)
+            store = self._load_pipeline_input(roi_id)
+            store = self._run_pipeline(store, roi_id, batch['plot'])
             self._save_pipeline_outputs(store, assume_clean_state)
 
     def collect_job_output(self, batch):

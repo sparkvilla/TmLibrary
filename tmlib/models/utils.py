@@ -655,6 +655,40 @@ class _Session(object):
         connection.close()
         self._session.close()
 
+    def get_unique_ids(self, model, n):
+        '''Gets unique values for a give `model`.
+
+        Parameters
+        ----------
+        model: class
+            class derived from
+            :class:`ExperimentModel <tmlib.models.base.ExperimentModel>` or
+            :class:`MainModel <tmlib.models.base.MainModel>`
+        n: int
+            number of IDs that should be returned
+
+        Returns
+        -------
+        List[int]
+            unique, shard-specific IDs
+
+        Raises
+        ------
+        ValueError
+            when the table of `model` is not distributed
+        '''
+        logger.debug(
+            'get unique identifier for model "%s"', model.__name__
+        )
+        result = self._session.connection.execute('''
+            SELECT nextval(%(sequence)s) FROM generate_series(1, %(n)s);
+        ''', {
+            'sequence': '{t}_id_seq'.format(t=model.__table__.name),
+            'n': n
+        })
+        values = result.fetchall()
+        return [v[0] for v in values]
+
 
 class MainSession(_Session):
 
@@ -947,7 +981,8 @@ class ExperimentConnection(_Connection):
         ----------
         model: class
             class derived from
-            :class:`ExperimentModel <tmlib.models.base.ExperimentModel>`
+            :class:`ExperimentModel <tmlib.models.base.ExperimentModel>` or
+            :class:`MainModel <tmlib.models.base.MainModel>`
         n: int
             number of IDs that should be returned
 

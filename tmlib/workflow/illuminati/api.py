@@ -612,8 +612,10 @@ class PyramidBuilder(WorkflowStepAPI):
                     'create static mapobject type "%s" for reference type "%s"',
                     name, cls.__name__
                 )
+                # Mapobjects of "static" type get partitioned by IDs of
+                # reference model instances.
                 mapobject_type = session.get_or_create(
-                    tm.MapobjectType, name=name, static=True,
+                    tm.MapobjectType, name=name,
                     experiment_id=self.experiment_id, ref_model=cls.__name__
                 )
                 mapobject_type_id = mapobject_type.id
@@ -658,14 +660,18 @@ class PyramidBuilder(WorkflowStepAPI):
                     delete()
                 logger.debug('add new mapobjects of type "%s"', name)
                 for key, value in segmentations.iteritems():
+                    mapobject_id = session.get_unique_ids(tm.Mapobject, 1)[0]
                     mapobject = tm.Mapobject(
-                        partition_key=key, mapobject_type_id=mapobject_type_id
+                        partition_key=mapobject_id,
+                        mapobject_type_id=mapobject_type_id, ref_id=key
                     )
+                    mapobject.id = mapobject_id
                     session.add(mapobject)
-                    session.flush()
                     logger.debug('add mapobject #%d', mapobject.id)
+                    # The value for the paritition_key of "static" mapobjects
+                    # is the ID of instances of reference model class.
                     mapobject_segmentation = tm.MapobjectSegmentation(
-                        partition_key=key, mapobject_id=mapobject.id,
+                        partition_key=mapobject.id, mapobject_id=mapobject.id,
                         geom_polygon=value['polygon'],
                         geom_centroid=value['polygon'].centroid,
                         segmentation_layer_id=value['segmentation_layer_id'],

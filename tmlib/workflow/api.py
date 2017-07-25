@@ -154,7 +154,7 @@ class WorkflowStepAPI(BasicWorkflowStepAPI):
         experiment_id: int
             ID of the processed experiment
         ordinal: int, optional
-            position of the step in the workflow relative to other
+            position of the step in the workflow in case there are multiple
             instances of the same step
             (only relevant if ``__unique__`` is ``False``)
 

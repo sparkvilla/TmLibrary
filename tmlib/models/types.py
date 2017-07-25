@@ -90,6 +90,16 @@ class ST_IsValid(GenericFunction):
     type = Geometry
 
 
+class ST_Envelope(GenericFunction):
+
+    '''Implementation of the Postgis function
+    `ST_Envelope <http://postgis.net/docs/ST_Envelope.html>`_.
+    '''
+
+    name = 'ST_Envelope'
+    type = Geometry
+
+
 class ST_GeomFromText(GenericFunction):
 
     '''Implementation of the Postgis function

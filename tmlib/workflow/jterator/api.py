@@ -263,7 +263,7 @@ class ImageAnalysisPipelineEngine(WorkflowStepAPI):
             # don't know the partitio_key to restrict it to a single shard or
             # a few shards. This is create quite some overhead on the
             # database coordinator node in case multiple jobs run in parallel.
-            roi_mapobject_segmentation = session.query(
+            roi_segmentation = session.query(
                     tm.MapobjectSegmentation
                 ).\
                 filter_by(mapobject_id==roi_id).\
@@ -278,7 +278,7 @@ class ImageAnalysisPipelineEngine(WorkflowStepAPI):
                 join(tm.MapobjectSegmentation).\
                 filter(
                     tm.MapobjectSegmentation.geom_polygon.ST_Intersect(
-                        roi_mapobject_segmentation.geom_polygon.ST_Envelope()
+                        roi_segmentation.geom_polygon.ST_Envelope()
                     ),
                     tm.Mapobject.mapobject_type_id == site_mapobject_type.id
                 ).\
@@ -385,7 +385,7 @@ class ImageAnalysisPipelineEngine(WorkflowStepAPI):
 
             for obj in objects_input:
                 # Segmentation images are generated for the entire ROI by
-                # loading all mapobject segmentations that intersect with the
+                # loading all mapobject segmentations that are contained by the
                 # ROI and then drawing the contours into the array to
                 # (re)construct the label image.
                 mapobject_type = session.query(tm.MapobjectType).\
@@ -407,8 +407,8 @@ class ImageAnalysisPipelineEngine(WorkflowStepAPI):
                                 tm.MapobjectSegmentation.geom_polygon
                             ).\
                             filter(
-                                tm.MapobjectSegmentation.geom_centroid.ST_Intersect(
-                                    roi_mapobject_segmentation.geom_polygon
+                                tm.MapobjectSegmentation.geom_centroid.ST_CoveredBy(
+                                    roi_segmentation.geom_polygon
                                 ),
                                 tm.MapobjectSegmentation.layer_id == layer.id,
                                 tm.MapobjectSegmentation.partition_key == roi_id

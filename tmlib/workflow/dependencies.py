@@ -14,171 +14,181 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import collections
-from abc import ABCMeta
+
+from utils import assert_type
 
 
 _workflow_register = dict()
 
 
-class _WorkflowDependenciesMeta(ABCMeta):
+class _WorkflowDefinitionMeta(type):
 
-    def __init__(self, name, bases, d):
-        ABCMeta.__init__(self, name, bases, d)
-        required_attrs = {
-            'STAGES': list,
-            'STAGE_MODES': dict,
-            'STEPS_PER_STAGE': dict,
-            'INTER_STAGE_DEPENDENCIES': dict,
-            'INTRA_STAGE_DEPENDENCIES': dict,
-            '__type__': str
-        }
-        if '__abstract__' in vars(self):
-            if getattr(self, '__abstract__'):
-                return
-        for attr_name, attr_type in required_attrs.iteritems():
-            if not hasattr(self, attr_name):
-                raise AttributeError(
-                    'Class "%s" must implement attribute "%s".' % (
-                        self.__name__, attr_name
-                    )
-                )
-            attr_val = getattr(self, attr_name)
-            if not isinstance(attr_val, attr_type):
+    def __call__(cls, name, *args, **kwargs):
+        # We store all instances of classes in a dictionary, such that we
+        # can conveniently retrieve definied workflow types from the register.
+        instance = type.__call__(cls, name, *args, **kwargs)
+        _workflow_register[name] = instance
+        return instance
+
+    def __new__(cls, name, bases, classdict):
+        for b in bases:
+            if isinstance(b, WorkflowDefinition):
                 raise TypeError(
-                    'Attribute "%s" of class "%s" must have type %s.' % (
-                        attr_name, self.__name__, attr_type.__name__
-                    )
+                    'Type "%s" is not a valid base type.' % b.__name__
                 )
-            # TODO: check intra_stage_dependencies inter_stage_dependencies
-            # based on __dependencies__
-        _workflow_register[getattr(self, '__type__')] = self
+        return type.__new__(cls, name, bases, classdict)
 
 
-class WorkflowDependencies(object):
+class WorkflowStageDefinition(object):
 
-    '''Abstract base class for declartion of workflow dependencies.
+    '''Class for definining the computational graph of a
+    :class:`WorkflowStage <tmlib.workflow.workflow.WorkflowStage>`
 
-    Derived classes will be used by descriptor classes in
-    :mod:`tmlib.worklow.description` to declare a workflow `type`.
-
-    In addtion, derived classes must implement the following attributes:
-
-        * ``__type__``: name of the workflow type
-        * ``STAGES`` (list): names of stages that the workflow should have
-        * ``STAGE_MODES`` (dict): mapping of stage name to processing mode
-          (either ``"parallel"`` or ``"sequential"``)
-        * ``STEPS_PER_STAGE`` (dict): ordered mapping of
-          stage name to corresponding step names
-        * ``INTER_STAGE_DEPENDENCIES`` (dict): mapping of stage name to names
-          of other stages the referenced stage depends on
-        * ``INTRA_STAGE_DEPENDENCIES`` (dict): mapping of step name to names
-          of other steps the referenced step depends on
+    Instances of the class define the name of a stage and the order of steps.
+    They are used to check whether a user provided
+    :class:`WorkflowStageDescription <tmlib.workflow.description.WorkflowStageDescription>`
+    is valid.
 
     '''
 
-    __metaclass__ = _WorkflowDependenciesMeta
+    __slots__ = ('_name', '_steps', '_concurrent')
 
-    __abstract__ = True
+    @assert_type(name='basestring', steps='list')
+    def __init__(self, name, steps, concurrent=False):
+        self._name = str(name)
+        self._steps = list()
+        for s in steps:
+            if not isinstance(s, basestring):
+                raise TypeError(
+                    'Elements of argument "steps" must have type strings.'
+                )
+            self._steps.append(str(s))
+        if not isinstance(concurrent, bool):
+            raise TypeError('Argument "concurrent" must have type bool.')
+        self._concurrent = concurrent
 
+    @property
+    def name(self):
+        '''str: name of the stage'''
+        return self._name
 
-class CanonicalWorkflowDependencies(WorkflowDependencies):
+    @property
+    def concurrent(self):
+        '''bool: whether steps should be executed in parallel'''
+        return self._concurrent
 
-    '''Declaration of dependencies for the canonical workflow.'''
+    @property
+    def steps(self):
+        '''Tuple[str]: names of steps
 
-    __type__ = 'canonical'
+        Note
+        ----
+        The attribute defines the order in which steps must be executed
+        in case ``concurrent`` is ``False``.
+        '''
+        return tuple(self._steps)
 
-    #: List[str]: names of workflow stages
-    STAGES = [
-        'image_conversion',
-        'image_preprocessing',
-        'pyramid_creation',
-        'image_analysis'
-    ]
+    def to_dict(self):
+        '''Returns attributes of the class as a mapping of key-value pairs.
 
-    #: Dict[str, str]: mode for each workflow stage, i.e. whether setps of a stage
-    #: should be submitted in parallel or sequentially
-    STAGE_MODES = {
-        'image_conversion': 'sequential',
-        'image_preprocessing': 'parallel',
-        'pyramid_creation': 'sequential',
-        'image_analysis': 'sequential'
-    }
-
-    #: collections.OrderedDict[str, List[str]]: names of steps within each stage
-    STEPS_PER_STAGE = {
-        'image_conversion':
-            ['metaextract', 'metaconfig', 'imextract'],
-        'image_preprocessing':
-            ['corilla'],
-        'pyramid_creation':
-            ['illuminati'],
-        'image_analysis':
-            ['jterator']
-    }
-
-    #: collections.OrderedDict[str, Set[str]]: dependencies between workflow stages
-    INTER_STAGE_DEPENDENCIES = {
-        'image_conversion': {
-
-        },
-        'image_preprocessing': {
-            'image_conversion'
-        },
-        'pyramid_creation': {
-            'image_conversion', 'image_preprocessing'
-        },
-        'image_analysis': {
-            'image_conversion', 'image_preprocessing'
+        Returns
+        -------
+        dict
+        '''
+        return {
+            'name': self.name,
+            'concurrent': self.concurrent,
+            'steps': self._steps
         }
-    }
-
-    #: Dict[str, Set[str]: dependencies between workflow steps within one stage
-    INTRA_STAGE_DEPENDENCIES = {
-        'metaextract': {
-
-        },
-        'metaconfig': {
-            'metaextract'
-        },
-        'imextract': {
-            'metaconfig'
-        }
-    }
 
 
-class MultiplexingWorkflowDependencies(CanonicalWorkflowDependencies):
+class WorkflowDefinition(object):
 
-    '''Declaration of dependencies for a multiplexing workflow, which includes
-    the :mod:`algin <tmlib.workflow.align>` step.
+    '''Class for definition of a
+    :class:`Workflow <tmlib.workflow.workflow.Workflow>`.
+
+    Instances of the class define the order of stages and provide information
+    about each required stage in form of a
+    :class:`WorkflowStageDefinition <tmlib.workflow.dependencies.WorkflowStageDefinition>`.
+    They are used to check whether a user provided
+    :class:`WorkflowDescription <tmlib.workflow.description.WorkflowDescription>`
+    is valid.
+
     '''
 
-    __type__ = 'multiplexing'
+    __metaclass__ = _WorkflowDefinitionMeta
 
-    #: Dict[str, str]: mode for each workflow stage, i.e. whether setps of a stage
-    #: should be submitted in parallel or sequentially
-    STAGE_MODES = {
-        'image_conversion': 'sequential',
-        'image_preprocessing': 'sequential',
-        'pyramid_creation': 'sequential',
-        'image_analysis': 'sequential'
-    }
+    __slots__ = ('_name', '_stages')
 
-    #: Dict[str, List[str]]: names of steps within each stage
-    STEPS_PER_STAGE = {
-        'image_conversion':
-            ['metaextract', 'metaconfig', 'imextract'],
-        'image_preprocessing':
-            ['corilla', 'align'],
-        'pyramid_creation':
-            ['illuminati'],
-        'image_analysis':
-            ['jterator']
-    }
+    @assert_type(name='basestring', stages='list')
+    def __init__(self, name, stages):
+        '''
+        Parameters
+        ----------
+        name: str
+            name of the workflow type
+        '''
+        self._name = name
+        for s in stages:
+            if not isinstance(s, WorkflowStageDefinition):
+                raise TypeError(
+                    'Elements of argument "stages" must have type "%s".' %
+                    WorkflowStageDefinition.__name__
+                )
+        self._stages = stages
+
+    @property
+    def name(self):
+        '''str: name of the workflow type'''
+        return str(self._name)
+
+    @property
+    def stages(self):
+        '''Tuple[tmlib.workflow.dependencies.WorkflowStageDefinition]: stages
+        of the workflow
+        '''
+        return tuple(self._stages)
+
+    def get_stage(self, name):
+        '''Retrieves a defined stage.
+
+        Parameters
+        ----------
+        name: str
+            name of a defined stage
+
+        Returns
+        -------
+        tmlib.workflow.dependencies.WorkflowStageDefinition
+            stage definition
+
+        Raises
+        ------
+        ValueError
+            when no such stage exists
+        '''
+        stage_names = [s.name for s in self.stages]
+        try:
+            index = stage_names.index(name)
+        except ValueError:
+            raise ValueError('Stage "%s" is not defined.' % name)
+        return self._stages[index]
+
+    def to_dict(self):
+        '''Returns attributes of the class as a mapping of key-value pairs.
+
+        Returns
+        -------
+        dict
+        '''
+        return {
+            'name': self.name,
+            'stages': [s.to_dict() for s in self.stages]
+        }
 
 
-
-def get_workflow_type_information():
-    '''Gets the names of each implemented workflow type.
+def get_workflow_types():
+    '''Provides the names of available workflow types.
 
     Returns
     -------
@@ -189,19 +199,68 @@ def get_workflow_type_information():
     return set(_workflow_register.keys())
 
 
-def get_workflow_dependencies(name):
-    '''Gets a workflow type specific implementation of
-    :class:`WorkflowDependencies <tmlib.workflow.dependencies.WorkflowDependencies>`.
+def get_workflow_definition(name):
+    '''Provides a
+    :class:`WorkflowDefinition <tmlib.workflow.dependencies.WorkflowDefinition>`.
 
     Parameters
     ----------
     name: str
-        name of the workflow type
+        name of a workflow type
 
     Returns
     -------
-    classobj
+    tmlib.workflow.dependencies.WorkflowDefinition
+        workflow definition
     '''
-    return _workflow_register[name]
+    try:
+        return _workflow_register[name]
+    except KeyError:
+        raise KeyError('Worflow type "%s" is not defined.' % name)
 
+
+_canonical = WorkflowDefinition(
+    name='canonical',
+    stages = [
+        WorkflowStageDefinition(
+            name='image_conversion', concurrent=False,
+            steps=['metaextract', 'metaconfig', 'imextract']
+        ),
+        WorkflowStageDefinition(
+            name='image_preprocessing', concurrent=True,
+            steps=['corilla']
+        ),
+        WorkflowStageDefinition(
+            name='pyramid_creation', concurrent=False,
+            steps=['illuminati']
+        ),
+        WorkflowStageDefinition(
+            name='pyramid_creation', concurrent=False,
+            steps=['jterator']
+        )
+    ]
+)
+
+
+_multiplexing = WorkflowDefinition(
+    name='multiplexing',
+    stages = [
+        WorkflowStageDefinition(
+            name='image_conversion', concurrent=False,
+            steps=['metaextract', 'metaconfig', 'imextract']
+        ),
+        WorkflowStageDefinition(
+            name='image_preprocessing', concurrent=False,
+            steps=['corilla', 'align']
+        ),
+        WorkflowStageDefinition(
+            name='pyramid_creation', concurrent=False,
+            steps=['illuminati']
+        ),
+        WorkflowStageDefinition(
+            name='pyramid_creation', concurrent=False,
+            steps=['jterator']
+        )
+    ]
+)
 

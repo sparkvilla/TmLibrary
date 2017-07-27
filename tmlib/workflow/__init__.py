@@ -93,7 +93,6 @@ logger = logging.getLogger(__name__)
 
 
 _step_register = collections.defaultdict(dict)
-_workflow_register = collections.defaultdict(dict)
 
 
 def register_step_api(name):

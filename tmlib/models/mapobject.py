@@ -365,7 +365,7 @@ class MapobjectType(ExperimentModel, IdMixIn):
                 )], else_=False).label('is_border')
             ).\
             filter(
-                MapobjectSegmentation.segmentation_layer_id == layer.id
+                MapobjectSegmentation.segmentation_layer_id == layer.id,
                 MapobjectSegmentation.partition_key == site.well_id
             ).\
             order_by(MapobjectSegmentation.mapobject_id).\

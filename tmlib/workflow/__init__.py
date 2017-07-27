@@ -71,10 +71,8 @@ from *steps* based on
 provided by users as a mapping in *YAML* format.
 The *workflow* structure, i.e. the sequence of *stages* and *steps* and their
 interdependencies, is defined by its *type*, which is determined based on an
-implementation of
-:class:`WorkflowDependencies <tmlib.workflow.dependencies.WorkflowDependencies>`.
-As an example serves the "canonical" type declared by
-:class:`CanonicalWorkflowDependencies <tmlib.workflow.canonical.CanonicalWorkflowDependencies>`.
+type-specific instance of
+:class:`WorkflowDefintion <tmlib.workflow.dependencies.WorkflowDefinition>`.
 
 '''
 import os

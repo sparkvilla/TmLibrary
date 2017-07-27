@@ -603,39 +603,63 @@ class PyramidBuilder(WorkflowStepAPI):
         batch: dict
             job description
         '''
+        # Mapobjects are distributed by well ID. This doesn't work for plates,
+        # however, since a plate contain multiple wells by definition. Therefore,
+        # the value for the partition_key is set to 0 for all plates.
         mapobject_mappings = {
-            'Plates': tm.Plate, 'Wells': tm.Well, 'Sites': tm.Site
+            tm.Plate.__name__: {
+                'name': 'Plates', 'cls': tm.Plate,
+                'get_offset': lambda obj: obj.offset,
+                'get_partition_key': lambda obj: 0,
+                'get_image_size': lambda obj: obj.image_size
+            },
+            tm.Well.__name__: {
+                'name': 'Wells', 'cls': tm.Well,
+                'get_offset': lambda obj: obj.offset,
+                'get_partition_key': lambda obj: obj.id,
+                'get_image_size': lambda obj: obj.image_size
+            },
+            tm.Site.__name__: {
+                'name': 'Sites', 'cls': tm.Site,
+                'get_offset': lambda obj: obj.aligned_offset,
+                'get_partition_key': lambda obj: obj.well_id,
+                'get_image_size': lambda obj: obj.aligned_image_size
+            }
         }
-        for name, cls in mapobject_mappings.iteritems():
-            with tm.utils.ExperimentSession(self.experiment_id, transaction=False) as session:
+        for model_name, mapping in mapobject_mappings.iteritems():
+            with tm.utils.ExperimentSession(self.experiment_id, False) as session:
+                name = mapping['name']
                 logger.info(
                     'create static mapobject type "%s" for reference type "%s"',
-                    name, cls.__name__
+                    name, model_name
                 )
                 # Mapobjects of "static" type get partitioned by IDs of
                 # reference model instances.
                 mapobject_type = session.get_or_create(
                     tm.MapobjectType, name=name,
-                    experiment_id=self.experiment_id, ref_model=cls.__name__
+                    experiment_id=self.experiment_id, ref_type=model_name
                 )
                 mapobject_type_id = mapobject_type.id
                 segmentation_layer = session.get_or_create(
                     tm.SegmentationLayer, mapobject_type_id=mapobject_type_id
                 )
 
-                logger.info('create individual mapobjects of type "%s"', name)
-                segmentations = dict()
-                for obj in session.query(cls):
+                logger.debug('delete existing mapobjects of type "%s"', name)
+                session.query(tm.Mapobject).\
+                    filter_by(mapobject_type_id=mapobject_type_id).\
+                    delete()
+
+                instances = session.query(cls).all()
+                logger.info('create mapobjects of type "%s"', name)
+                mapobject_ids = session.get_unique_ids(
+                    tm.Mapobject, len(instances)
+                )
+                for obj in instances:
                     logger.debug(
                         'create mapobject for reference object #%d', obj.id
                     )
-                    if name == 'Sites':
-                        # We need to account for the "multiplexing" edge case.
-                        offset = obj.aligned_offset
-                        image_size = obj.aligned_image_size
-                    else:
-                        offset = obj.offset
-                        image_size = obj.image_size
+                    offset = mapping['get_offset'](obj)
+                    image_size = mapping['get_image_size'](obj)
                     # First element: x axis
                     # Second element: inverted (!) y axis
                     # We further subtract one pixel such that the polygon
@@ -649,31 +673,20 @@ class PyramidBuilder(WorkflowStepAPI):
                     # Closed circle with coordinates sorted counter-clockwise
                     contour = np.array([ur, ul, ll, lr, ur])
                     polygon = shapely.geometry.Polygon(contour)
-                    segmentations[obj.id] = {
-                        'segmentation_layer_id': segmentation_layer.id,
-                        'polygon': polygon
-                    }
 
-                logger.debug('delete existing mapobjects of type "%s"', name)
-                session.query(tm.Mapobject).\
-                    filter_by(mapobject_type_id=mapobject_type_id).\
-                    delete()
-                logger.debug('add new mapobjects of type "%s"', name)
-                for key, value in segmentations.iteritems():
-                    mapobject_id = session.get_unique_ids(tm.Mapobject, 1)[0]
+                    partition_key = mapping['get_partition_key'](obj)
                     mapobject = tm.Mapobject(
-                        partition_key=mapobject_id,
-                        mapobject_type_id=mapobject_type_id, ref_id=key
+                        partition_key=partition_key,
+                        mapobject_type_id=mapobject_type_id, ref_id=obj.id
                     )
-                    mapobject.id = mapobject_id
+                    mapobject.id = mapobject_ids[i]
                     session.add(mapobject)
-                    logger.debug('add mapobject #%d', mapobject.id)
-                    # The value for the paritition_key of "static" mapobjects
-                    # is the ID of instances of reference model class.
+
                     mapobject_segmentation = tm.MapobjectSegmentation(
-                        partition_key=mapobject.id, mapobject_id=mapobject.id,
-                        geom_polygon=value['polygon'],
-                        geom_centroid=value['polygon'].centroid,
-                        segmentation_layer_id=value['segmentation_layer_id'],
+                        partition_key=key, mapobject_id=mapobject.id,
+                        geom_polygon=polygon,
+                        geom_centroid=polygon.centroid,
+                        segmentation_layer_id=segmentation_layer.id,
                     )
                     session.add(mapobject_segmentation)
+

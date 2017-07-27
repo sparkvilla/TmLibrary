@@ -70,14 +70,7 @@ class MapobjectType(ExperimentModel, IdMixIn):
     #: str: name of another model class that serves as a reference for
     #: "static" mapobject types, for which geometric representations are
     #: pre-defined by the experiment layout (e.g. "Plates" or "Wells")
-    ref_model = Column(String(50), unique=True, index=True)
-
-    #: int: ID of a mapobject type by which mapobjects are partitioned,
-    #: i.e. distributed across shards (defaults to itself if not specified)
-    partitioned_by = Column(
-        Integer, index=True,
-        server_default=text("currval('mapobject_types_id_seq')")
-    )
+    ref_type = Column(String(50), unique=True, index=True)
 
     #: int: ID of parent experiment
     experiment_id = Column(
@@ -92,7 +85,7 @@ class MapobjectType(ExperimentModel, IdMixIn):
         backref=backref('mapobject_types', cascade='all, delete-orphan')
     )
 
-    def __init__(self, name, experiment_id, partitioned_by=None, ref_model=None):
+    def __init__(self, name, experiment_id, ref_type=None):
         '''
         Parameters
         ----------
@@ -101,24 +94,18 @@ class MapobjectType(ExperimentModel, IdMixIn):
         experiment_id: int
             ID of the parent
             :class:`Experiment <tmlib.models.experiment.Experiment>`
-        partitioned_by: int
-            ID of mapobject type used for mapobject partitioning
-        ref_model: str, optional
+        ref_type: str, optional
             name of a reference model class (default: ``None``)
         '''
         self.name = name
-        if ref_model is not None:
-            supported_ref_models = {'Site', 'Well', 'Plate'}
-            if ref_model not in supported_ref_models:
+        if ref_type is not None:
+            supported_ref_types = {'Site', 'Well', 'Plate'}
+            if ref_type not in supported_ref_types:
                 raise ValueError(
-                    'Value of argument "ref_model" must be either "%s"' %
-                    '", "'.join(supported_ref_models)
+                    'Value of argument "ref_type" must be either "%s"' %
+                    '", "'.join(supported_ref_types)
                 )
-            self.ref_model = ref_model
-        if partitioned_by is not None:
-            # Don't set the attribute in case no value is provided to use the
-            # server side default.
-            self.partition_by = partitioned_by
+            self.ref_type = ref_type
         self.experiment_id = experiment_id
 
     def get_site_geometry(self, site_id):
@@ -130,7 +117,37 @@ class MapobjectType(ExperimentModel, IdMixIn):
         Parameters
         ----------
         site_id: int
-            ID of the :class:`Site <tmlib.models.site.Site>`
+            ID of the site
+
+        Returns
+        -------
+        geoalchemy2.elements.WKBElement
+        '''
+        session = Session.object_session(self)
+        site = session.query(Site).get(site_id)
+        mapobject_type = session.query(MapobjectType.id).\
+            filter_by(ref_type=Site.__name__).\
+            one()
+        segmentation = session.query(MapobjectSegmentation.geom_polygon).\
+            join(Mapobject).\
+            filter(
+                Mapobject.partition_key == site.well_id,
+                Mapobject.ref_id == site_id,
+                Mapobject.mapobject_type_id == mapobject_type.id
+            ).\
+            one()
+        return segmentation.geom_polygon
+
+    def get_well_geometry(self, well_id):
+        '''Gets the geometric representation of a
+        :class:`Well <tmlib.models.well.Well>`.
+        in form of a
+        :class:`MapobjectSegmentation <tmlib.models.mapobject.MapobjectSegmentation>`.
+
+        Parameters
+        ----------
+        well_id: int
+            ID of the well
 
         Returns
         -------
@@ -138,26 +155,29 @@ class MapobjectType(ExperimentModel, IdMixIn):
         '''
         session = Session.object_session(self)
         mapobject_type = session.query(MapobjectType.id).\
-            filter_by(ref_model=Site.__name__).\
+            filter_by(ref_type=Well.__name__).\
             one()
         segmentation = session.query(MapobjectSegmentation.geom_polygon).\
             join(Mapobject).\
             filter(
-                Mapobject.partition_key == site_id,
+                Mapobject.partition_key == well_id,
+                Mapobject.ref_id == well_id,
                 Mapobject.mapobject_type_id == mapobject_type.id
             ).\
             one()
         return segmentation.geom_polygon
 
-    def get_segmentations(self, partition_key, tpoint, zplane, as_polygons=True):
+    def get_segmentations_per_well(self, well_id, tpoint, zplane,
+            as_polygons=True):
         '''Gets each
         :class:`MapobjectSegmentation <tmlib.models.mapobject.MapobjectSegmentation>`
-        for a given partition, time point and z position.
+        that intersects with the spatial representation of a given
+        :class:`Well <tmlib.models.well.Well>`.
 
         Parameters
         ----------
-        partition_key: int
-            partition for which objects should be filtered
+        well_id: int
+            ID of the well for which objects should be filtered spatially
         tpoint: int
             time point for which objects should be filtered
         zplane: int
@@ -189,26 +209,27 @@ class MapobjectType(ExperimentModel, IdMixIn):
                 MapobjectSegmentation.geom_centroid
             )
         segmentations = segmentations.\
-            filter_by(segmentation_layer_id=layer.id, partition_key=partition_key).\
+            filter_by(
+                segmentation_layer_id=layer.id, partition_key=partition_key
+            ).\
             order_by(MapobjectSegmentation.mapobject_id).\
             all()
 
         return segmentations
 
-    def get_feature_values_per_site(self, site_id, tpoint, feature_ids=None):
+    def get_feature_values_per_well(self, well_id, tpoint, feature_ids=None):
         '''Gets all
         :class:`FeatureValues <tmlib.models.feature.FeatureValues>`
         for each :class:`Mapobject <tmlib.models.MapobjectSegmentation>`
         where the corresponding
         :class:`MapobjectSegmentation <tmlib.models.mapobject.MapobjectSegmentation>`
         intersects with the geometric representation of a given
-        :class:`Site <tmlib.models.site.Site>`.
+        :class:`Well <tmlib.models.well.Well>`.
 
         Parameters
         ----------
-        site_id: int
-            ID of a :class:`Site <tmlib.models.site.Site>` for which
-            objects should be spatially filtered
+        well_id: int
+            ID of the well for which objects should be filtered spatially
         tpoint: int
             time point for which objects should be filtered
         feature_ids: List[int], optional
@@ -246,7 +267,7 @@ class MapobjectType(ExperimentModel, IdMixIn):
             filter(
                 Mapobject.mapobject_type_id == self.id,
                 FeatureValues.tpoint == tpoint,
-                FeatureValues.partition_key == site_id
+                FeatureValues.partition_key == partition_key
             ).\
             order_by(Mapobject.id).\
             all()
@@ -254,22 +275,20 @@ class MapobjectType(ExperimentModel, IdMixIn):
         mapobject_ids = [r.mapobject_id for r in records]
         df = pd.DataFrame(values, index=mapobject_ids)
         df.rename(columns=feature_map, inplace=True)
-
         return df
 
-    def get_label_values_per_site(self, site_id, tpoint):
+    def get_label_values_per_well(self, well_id, tpoint):
         '''Gets all :class:`LabelValues <tmlib.models.result.LabelValues>`
         for each :class:`Mapobject <tmlib.models.MapobjectSegmentation>`
         where the corresponding
         :class:`MapobjectSegmentation <tmlib.models.mapobject.MapobjectSegmentation>`
         intersects with the geometric representation of a given
-        :class:`Site <tmlib.models.site.Site>`.
+        :class:`Well <tmlib.models.well.Well>`.
 
         Parameters
         ----------
-        site_id: int
-            ID of a :class:`Site <tmlib.models.site.Site>` for which
-            objects should be spatially filtered
+        well_id: int
+            ID of the well for which objects should be filtered spatially
         tpoint: int, optional
             time point for which objects should be filtered
 
@@ -293,7 +312,7 @@ class MapobjectType(ExperimentModel, IdMixIn):
             filter(
                 Mapobject.mapobject_type_id == self.id,
                 LabelValues.tpoint == tpoint,
-                LabelValues.partition_key == site_id
+                LabelValues.partition_key == well_id
             ).\
             order_by(Mapobject.id).\
             all()
@@ -329,6 +348,7 @@ class MapobjectType(ExperimentModel, IdMixIn):
             ``False`` otherwise
         '''
         session = Session.object_session(self)
+        site = session.query(Site).get(site_id)
         site_geometry = self.get_site_geometry(site_id)
 
         layer = session.query(SegmentationLayer.id).\
@@ -345,8 +365,8 @@ class MapobjectType(ExperimentModel, IdMixIn):
                 )], else_=False).label('is_border')
             ).\
             filter(
-                MapobjectSegmentation.segmentation_layer_id == layer.id,
-                MapobjectSegmentation.partition_key == site_id
+                MapobjectSegmentation.segmentation_layer_id == layer.id
+                MapobjectSegmentation.partition_key == site.well_id
             ).\
             order_by(MapobjectSegmentation.mapobject_id).\
             all()
@@ -404,7 +424,7 @@ class Mapobject(DistributedExperimentModel):
 
         See also
         --------
-        :attr:`tmlib.models.mapobject.MapobjectType.ref_model`
+        :attr:`tmlib.models.mapobject.MapobjectType.ref_type`
         '''
         self.partition_key = partition_key
         self.mapobject_type_id = mapobject_type_id
@@ -817,13 +837,13 @@ class SegmentationLayer(ExperimentModel, IdMixIn):
         # and thus the number of requested mapobject segmentations dependents
         # on the size of monitor.
         if self.tpoint is None and self.zplane is None:
-            if self.mapobject_type.ref_model == 'Plate':
+            if self.mapobject_type.ref_type == 'Plate':
                 polygon_thresh = 0
                 centroid_thresh = 0
-            elif self.mapobject_type.ref_model == 'Well':
+            elif self.mapobject_type.ref_type == 'Well':
                 polygon_thresh = maxzoom_level - 11
                 centroid_thresh = 0
-            elif self.mapobject_type.ref_model == 'Site':
+            elif self.mapobject_type.ref_type == 'Site':
                 polygon_thresh = maxzoom_level - 8
                 centroid_thresh = 0
         else:

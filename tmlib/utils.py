@@ -573,3 +573,15 @@ def notimplemented(func):
     wrapper.is_implemented = False
     return wrapper
 
+
+class FixMeta(type):
+
+    '''Metaclass that prevents classes from being subclassed.'''
+
+    def __new__(cls, name, bases, classdict):
+        for b in bases:
+            if isinstance(b, FixMeta):
+                raise TypeError(
+                    'Type "%s" is not a valid base type.' % b.__name__
+                )
+        return type.__new__(cls, name, bases, classdict)

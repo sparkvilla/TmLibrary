@@ -67,12 +67,11 @@ into account.
 
 A :class:`Workflow <tmlib.workflow.workflow.Workflow>` is dynamically build
 from *steps* based on
-:class:`WorkflowDescription <tmlib.workflow.description.WorkflowDescription>` -
-provided by users as a mapping in *YAML* format.
-The *workflow* structure, i.e. the sequence of *stages* and *steps* and their
-interdependencies, is defined by its *type*, which is determined based on an
-type-specific instance of
-:class:`WorkflowDefintion <tmlib.workflow.dependencies.WorkflowDefinition>`.
+:class:`WorkflowDescription <tmlib.workflow.description.WorkflowDescription>`,
+which can be provided by users as a mapping in *YAML* format.
+The *workflow* logic, i.e. the sequence of *stages* and *steps* and their
+interdependencies, is defined by its *type* based on an instance of
+:class:`WorkflowDefintion <tmlib.workflow.definition.WorkflowDefinition>`.
 
 '''
 import os
@@ -162,11 +161,6 @@ def climethod(help, **kwargs):
     def decorator(func):
         if not isinstance(func, types.FunctionType):
             raise TypeError('Registered object must be a function.')
-        # if WorkflowStepCLI not in inspect.getmro(func.im_class):
-        #     raise TypeError(
-        #         'Class of registered method must be derived from '
-        #         'tmlib.workflow.cli.WorkflowStepCLI'
-        #     )
         func.is_climethod = True
         func.help = help
         func.args = _ArgumentMeta(
@@ -342,11 +336,8 @@ def get_step_information(name):
     Returns
     -------
     Tuple[str]
-        full name and brief description
+        full name and description
 
-    See also
-    --------
-    :func:`tmlib.workflow.register_step_api`
     '''
     subpkg_name = '%s.%s' % (__name__, name)
     try:

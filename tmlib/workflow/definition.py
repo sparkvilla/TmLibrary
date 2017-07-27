@@ -15,28 +15,11 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import collections
 
-from utils import assert_type
+from tmlib.workflow import get_step_information
+from tmlib.utils import assert_type, FixMeta
 
 
 _workflow_register = dict()
-
-
-class _WorkflowDefinitionMeta(type):
-
-    def __call__(cls, name, *args, **kwargs):
-        # We store all instances of classes in a dictionary, such that we
-        # can conveniently retrieve definied workflow types from the register.
-        instance = type.__call__(cls, name, *args, **kwargs)
-        _workflow_register[name] = instance
-        return instance
-
-    def __new__(cls, name, bases, classdict):
-        for b in bases:
-            if isinstance(b, WorkflowDefinition):
-                raise TypeError(
-                    'Type "%s" is not a valid base type.' % b.__name__
-                )
-        return type.__new__(cls, name, bases, classdict)
 
 
 class WorkflowStageDefinition(object):
@@ -53,6 +36,8 @@ class WorkflowStageDefinition(object):
 
     __slots__ = ('_name', '_steps', '_concurrent')
 
+    __metaclass__ = FixMeta
+
     @assert_type(name='basestring', steps='list')
     def __init__(self, name, steps, concurrent=False):
         self._name = str(name)
@@ -62,6 +47,11 @@ class WorkflowStageDefinition(object):
                 raise TypeError(
                     'Elements of argument "steps" must have type strings.'
                 )
+            try:
+                info = get_step_information(s)
+            except ImportError:
+                raise ValueError('Unknown step "%s".')
+            # TODO: Check whether step has to be __unique__
             self._steps.append(str(s))
         if not isinstance(concurrent, bool):
             raise TypeError('Argument "concurrent" must have type bool.')
@@ -102,6 +92,16 @@ class WorkflowStageDefinition(object):
         }
 
 
+class _WorkflowDefinitionMeta(FixMeta):
+
+    def __call__(cls, name, *args, **kwargs):
+        # We store all instances of classes in a dictionary, such that we
+        # can conveniently retrieve definied workflow types from the register.
+        instance = type.__call__(cls, name, *args, **kwargs)
+        _workflow_register[name] = instance
+        return instance
+
+
 class WorkflowDefinition(object):
 
     '''Class for definition of a
@@ -109,7 +109,7 @@ class WorkflowDefinition(object):
 
     Instances of the class define the order of stages and provide information
     about each required stage in form of a
-    :class:`WorkflowStageDefinition <tmlib.workflow.dependencies.WorkflowStageDefinition>`.
+    :class:`WorkflowStageDefinition <tmlib.workflow.definition.WorkflowStageDefinition>`.
     They are used to check whether a user provided
     :class:`WorkflowDescription <tmlib.workflow.description.WorkflowDescription>`
     is valid.
@@ -129,13 +129,19 @@ class WorkflowDefinition(object):
             name of the workflow type
         '''
         self._name = name
+        if len(stages) == 0:
+            raise ValueError('Argument "stages" must not be empty.')
+        self._stages = list()
         for s in stages:
             if not isinstance(s, WorkflowStageDefinition):
                 raise TypeError(
                     'Elements of argument "stages" must have type "%s".' %
                     WorkflowStageDefinition.__name__
                 )
-        self._stages = stages
+            existing_stages = [stage.name for stage in self._stages]
+            if s.name in existing_stages:
+                raise ValueError('Stage "%s" is already defined.')
+            self._stages.append(s)
 
     @property
     def name(self):
@@ -144,7 +150,7 @@ class WorkflowDefinition(object):
 
     @property
     def stages(self):
-        '''Tuple[tmlib.workflow.dependencies.WorkflowStageDefinition]: stages
+        '''Tuple[tmlib.workflow.definition.WorkflowStageDefinition]: stages
         of the workflow
         '''
         return tuple(self._stages)
@@ -159,7 +165,7 @@ class WorkflowDefinition(object):
 
         Returns
         -------
-        tmlib.workflow.dependencies.WorkflowStageDefinition
+        tmlib.workflow.definition.WorkflowStageDefinition
             stage definition
 
         Raises
@@ -201,7 +207,7 @@ def get_workflow_types():
 
 def get_workflow_definition(name):
     '''Provides a
-    :class:`WorkflowDefinition <tmlib.workflow.dependencies.WorkflowDefinition>`.
+    :class:`WorkflowDefinition <tmlib.workflow.definition.WorkflowDefinition>`.
 
     Parameters
     ----------
@@ -210,7 +216,7 @@ def get_workflow_definition(name):
 
     Returns
     -------
-    tmlib.workflow.dependencies.WorkflowDefinition
+    tmlib.workflow.definition.WorkflowDefinition
         workflow definition
     '''
     try:

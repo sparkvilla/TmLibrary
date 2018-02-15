@@ -1,0 +1,1 @@
+select master_modify_multiple_shards('update experiment_77.feature_values set values = values || hstore(''diego'',''is cool'')  where mapobject_id = 45190');

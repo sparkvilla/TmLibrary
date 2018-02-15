@@ -111,7 +111,7 @@ class CanonicalWorkflowDependencies(WorkflowDependencies):
         'pyramid_creation':
             ['illuminati'],
         'image_analysis':
-            ['jterator']
+            ['jterator','popcon']
     }
 
     #: collections.OrderedDict[str, Set[str]]: dependencies between workflow stages
@@ -170,7 +170,7 @@ class MultiplexingWorkflowDependencies(CanonicalWorkflowDependencies):
         'pyramid_creation':
             ['illuminati'],
         'image_analysis':
-            ['jterator']
+            ['jterator','popcon']
     }
 
 

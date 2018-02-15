@@ -144,6 +144,7 @@ class CanonicalWorkflowDependencies(WorkflowDependencies):
         'popcon' : {
             'jterator'
     }
+}
 
 
 class MultiplexingWorkflowDependencies(CanonicalWorkflowDependencies):

@@ -24,7 +24,7 @@ from tmlib.workflow.args import Argument
 logger = logging.getLogger(__name__)
 
 
-class PopCon(WorkflowStepCLI):
+class Popcon(WorkflowStepCLI):
 
     @assert_type(api_instance='tmlib.workflow.popcon.api.CrowdingEstimator')
     def __init__(self, api_instance, verbosity):
@@ -36,6 +36,6 @@ class PopCon(WorkflowStepCLI):
         verbosity: int
             logging verbosity
         '''
-        super(PopCon, self).__init__(api_instance, verbosity)
+        super(Popcon, self).__init__(api_instance, verbosity)
 
 

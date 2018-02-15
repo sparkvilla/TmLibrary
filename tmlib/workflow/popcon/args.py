@@ -20,7 +20,7 @@ from tmlib.workflow import register_step_submission_args
 
 
 @register_step_batch_args('popcon')
-class PopConBatchArguments(BatchArguments):
+class PopconBatchArguments(BatchArguments):
 
     extract_object = Argument(
         type=str, short_flag='e', 
@@ -40,6 +40,6 @@ class PopConBatchArguments(BatchArguments):
 
 
 @register_step_submission_args('popcon')
-class PopConSubmissionArguments(SubmissionArguments):
+class PopconSubmissionArguments(SubmissionArguments):
 
     pass

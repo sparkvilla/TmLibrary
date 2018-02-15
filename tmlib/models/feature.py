@@ -143,6 +143,15 @@ class FeatureValues(DistributedExperimentModel):
         self.values = values
 
     @classmethod
+    def _append_value(cls, connection, instance, key, val):
+        if not isinstance(instance, FeatureValues):
+            raise TypeError(
+                'Object must have type tmlib.models.feature.FeatureValues'
+            )
+        connection.execute('''SELECT master_modify_multiple_shards('UPDATE feature_values SET values = values || hstore('%(key)s','%(val)s') WHERE mapobject_id = %(mapobject_id)s');''',{'mapobject_id': instance.mapobject_id, 'key': key, 'val':val})
+
+ 
+    @classmethod
     def _add(cls, connection, instance):
         if not isinstance(instance, FeatureValues):
             raise TypeError(
@@ -150,13 +159,13 @@ class FeatureValues(DistributedExperimentModel):
             )
         connection.execute('''
             INSERT INTO feature_values AS v (
-                parition_key, values, mapobject_id, tpoint
+                partition_key, values, mapobject_id, tpoint
             )
             VALUES (
                 %(partition_key)s, %(values)s, %(mapobject_id)s, %(tpoint)s
             )
             ON CONFLICT
-            ON CONSTRAINT feature_values_mapobject_id_tpoint_key
+            -- ON CONSTRAINT feature_values_mapobject_id_fkey
             DO UPDATE
             SET values = v.values || %(values)s
             WHERE v.mapobject_id = %(mapobject_id)s
@@ -188,6 +197,6 @@ class FeatureValues(DistributedExperimentModel):
 
     def __repr__(self):
         return (
-            '<FeatureValues(id=%r, tpoint=%r, mapobject_id=%r)>'
-            % (self.id, self.tpoint, self.mapobject_id)
+            '<FeatureValues(partition_key=%r, tpoint=%r, mapobject_id=%r)>'
+            % (self.partition_key, self.tpoint, self.mapobject_id)
         )

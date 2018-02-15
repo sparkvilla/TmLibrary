@@ -75,14 +75,14 @@ for well_id in batch['well_ids']:
 	#wellY = sites[0][1]*len(set([i[3] for i in sites]))
 	#wellX = sites[0][2]*len(set([i[4]for i in sites]))
 	 
-#	extract_mapobject_type_id = session.query(tm.MapobjectType.id).\
-#	    filter_by(name=batch['extract_object']).one()[0] 
+        extract_mapobject_type_id = session.query(tm.MapobjectType.id).\
+	    filter_by(name=batch['extract_object']).one()[0] 
 #	extract_seg_layer_id = session.query(tm.SegmentationLayer.id).\
 #	    filter_by(mapobject_type_id=extract_mapobject_type_id).one()[0]
 #	extract_centroids = session.query(tm.MapobjectSegmentation.geom_centroid,tm.MapobjectSegmentation.mapobject_id,tm.MapobjectSegmentation.label,tm.MapobjectSegmentation.partition_key).\
 #	   filter_by(segmentation_layer_id=extract_seg_layer_id).all()
         
-        _append_value(session, mapobject_id=45189,key='test',val='value_test')
+#        _append_value(session, mapobject_id=45189,key='test',val='value_test')
 #	assign_mapobject_type_id = session.query(tm.MapobjectType.id).\
 #	    filter_by(name=batch['assign_object']).one()[0] 
 #	assign_seg_layer_id = session.query(tm.SegmentationLayer.id).\
@@ -113,7 +113,7 @@ for well_id in batch['well_ids']:
 #	         is_aggregate=False)
 #        feature_values = list()
 #        for idx, value in enumerate(lcc):
-        session.commit()
+        session.expunge_all()
 #	    feature_values.append(
 #                                tm.FeatureValues(
 #                                partition_key=lcc_extract,

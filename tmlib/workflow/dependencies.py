@@ -140,7 +140,9 @@ class CanonicalWorkflowDependencies(WorkflowDependencies):
         },
         'imextract': {
             'metaconfig'
-        }
+        },
+        'popcon' : {
+            'jterator'
     }
 
 

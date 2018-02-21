@@ -28,7 +28,7 @@ class LocalCC(object):
         df = data_df.sort_values(['site', 'label'])
         return df
 
-    def __init__(self, centroids):
+    def __init__(self, centroids, wellY, wellX):
         '''
         Parameters
         ----------
@@ -37,12 +37,12 @@ class LocalCC(object):
         '''
         self.centroids = centroids
        
-        self.centroids_coordinates = [(self._get_yx(element[0]).y,self._get_yx(element[0]).x, int(element[1]), int(element[2]), int(element[3])) for element in self.centroids]
+        self.centroids_coordinates = [(abs(self._get_yx(element[0]).y),abs(self._get_yx(element[0]).x), int(element[1]), int(element[2]), int(element[3])) for element in self.centroids]
                
         self.df = self._get_df(self.centroids_coordinates)
         self.yx_coordinates = np.asarray((self.df['y'],self.df['x'])).transpose()
-        self.wellY = np.floor(self.df['y'].min())
-        self.wellX = np.ceil(self.df['x'].max())
+        self.wellY = wellY
+        self.wellX = wellX
         self.well_diagonal = np.round(math.sqrt(self.wellX**2+self.wellY**2))
         
        
@@ -67,7 +67,7 @@ class LocalCC(object):
 	rand_dists= list() 
 	   
 	for yx_real in self.yx_coordinates:
-	    y_rand= np.random.uniform(self.wellY,0,len(self.yx_coordinates)-1)
+	    y_rand= np.random.uniform(0,self.wellY,len(self.yx_coordinates)-1)
 	    x_rand= np.random.uniform(0,self.wellX,len(self.yx_coordinates)-1) 
 	    yx_coordinates_random = np.concatenate( (y_rand[:,np.newaxis],x_rand[:,np.newaxis]), axis=1)
        

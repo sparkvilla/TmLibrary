@@ -99,19 +99,6 @@ class CrowdingEstimator(WorkflowStepAPI):
         children instances for the processed experiment.
         '''
         pass     
-    #    logger.info('delete existing mapobjects and mapobject types')
-#        with tm.utils.ExperimentSession(self.experiment_id, False) as session:
-#            static_types = ['Plates', 'Wells', 'Sites']
-#            mapobject_types = session.query(tm.MapobjectType.id).\
-#                filter(~tm.MapobjectType.name.in_(static_types)).\
-#                all()
-#            mapobject_type_ids = [t.id for t in mapobject_types]
-#            session.query(tm.Mapobject).\
-#                filter(tm.Mapobject.mapobject_type_id.in_(mapobject_type_ids)).\
-#                delete()
-#            session.query(tm.MapobjectType).\
-#                filter(tm.MapobjectType.id.in_(mapobject_type_ids)).\
-#delete()
 
     def run_job(self, batch, assume_clean_state):
         '''Runs the pipeline, i.e. executes modules sequentially. After
@@ -126,32 +113,51 @@ class CrowdingEstimator(WorkflowStepAPI):
         for well_id in batch['well_ids']:
             logger.info('process well %d', well_id)
             with tm.utils.ExperimentSession(self.experiment_id) as session:
-#	        sites = session.query(tm.Site.id, tm.Site.height, tm.Site.width, tm.Site.y, tm.Site.x).\
-#                filter_by(well_id=well_id).all()
-#                wellY = sites_per_well[0][1]*len(set([i[3] for i in sites_per_well]))
-#                wellX = sites_per_well[0][2]*len(set([i[4]for i in sites_per_well]))
+                sites = session.query(tm.Site.id, tm.Site.height, tm.Site.width, tm.Site.y, tm.Site.x).\
+                 filter_by(well_id=well_id).all()
+                wellY = sites[0][1]*len(set([i[3] for i in sites]))
+                wellX = sites[0][2]*len(set([i[4]for i in sites]))
+                
                  
-                extract_mapobject_type_id = session.query(tm.MapobjectType.id).filter_by(name=batch['extract_object']).one()[0] 
-                extract_seg_layer_id = session.query(tm.SegmentationLayer.id).filter_by(mapobject_type_id=extract_mapobject_type_id).one()[0]
-                extract_centroids = session.query(tm.MapobjectSegmentation.geom_centroid,tm.MapobjectSegmentation.mapobject_id,tm.MapobjectSegmentation.label,tm.MapobjectSegmentation.partition_key).filter_by(segmentation_layer_id=extract_seg_layer_id).all()
-                assign_mapobject_type_id = session.query(tm.MapobjectType.id).filter_by(name=batch['assign_object']).one()[0] 
-                assign_seg_layer_id = session.query(tm.SegmentationLayer.id).filter_by(mapobject_type_id=assign_mapobject_type_id).one()[0]
-                assign_centroids = session.query(tm.MapobjectSegmentation.geom_centroid,tm.MapobjectSegmentation.mapobject_id,tm.MapobjectSegmentation.label,tm.MapobjectSegmentation.partition_key).filter_by(segmentation_layer_id=assign_seg_layer_id).all()
+                extract_mapobject_type_id = session.query(tm.MapobjectType.id).\
+                filter_by(name=batch['extract_object']).one()[0] 
+                extract_seg_layer_id = session.query(tm.SegmentationLayer.id).\
+                filter_by(mapobject_type_id=extract_mapobject_type_id).one()[0]
+                extract_centroids = session.query(tm.MapobjectSegmentation.geom_centroid,tm.MapobjectSegmentation.mapobject_id,tm.MapobjectSegmentation.label,tm.MapobjectSegmentation.partition_key).\
+                filter_by(segmentation_layer_id=extract_seg_layer_id).all()
+                assign_mapobject_type_id = session.query(tm.MapobjectType.id).\
+                filter_by(name=batch['assign_object']).one()[0] 
+                assign_seg_layer_id = session.query(tm.SegmentationLayer.id).\
+                filter_by(mapobject_type_id=assign_mapobject_type_id).one()[0]
+                assign_centroids = session.query(tm.MapobjectSegmentation.geom_centroid,tm.MapobjectSegmentation.mapobject_id,tm.MapobjectSegmentation.label,tm.MapobjectSegmentation.partition_key).\
+                filter_by(segmentation_layer_id=assign_seg_layer_id).all()
  
                 logger.info('Calculating LCC for well_id %s', well_id)
-                lcc_extract = LocalCC(extract_centroids)
+                logger.info('Instantiating LCC for extract_object')
+                lcc_extract = LocalCC(extract_centroids, wellY, wellX)
+                logger.info('df lcc_extract: %s',lcc_extract.df.head()) 
+                logger.info(
+                  'wellX: %s, wellY: %s, diagonal: %s'
+                   , lcc_extract.wellX, lcc_extract.wellY, lcc_extract.well_diagonal)
+                
                 real_lcc = lcc_extract.real_distances()
                 random_lcc = lcc_extract.random_distances() 
                 lcc = lcc_extract.get_lcc(real_lcc,random_lcc)
-
-                lcc_assign = LocalCC(assign_centroids)
+                logger.info('Instantiating LCC for assign_object')
+                lcc_assign = LocalCC(assign_centroids, wellY, wellX)
 
                 # remap y,x coordinates of extract object with mapobject_id
                 # of assign object
+                logger.info(
+                   'assign mapobject_id of %s to %s'
+                   , batch['assign_object'], batch['extract_object'])
+
+                #logger.debug(
+                #   'assign: %s extract: %s', lcc_assign.df['mapobject_id'], lcc_extract.df['mapobject_id']) 
+               
                 lcc_extract.df['mapobject_id'] = lcc_assign.df['mapobject_id'] 
 
-
-                feature_name = batch['extract_object']+'_{}_lcc'.format(well_id)
+                feature_name = 'LocalCellCrowding_{}'.format(batch['extract_object'])
                 feature = session.get_or_create(
                           tm.Feature, name=feature_name, 
                           mapobject_type_id=assign_mapobject_type_id,   

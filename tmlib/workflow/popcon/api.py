@@ -115,22 +115,40 @@ class CrowdingEstimator(WorkflowStepAPI):
             with tm.utils.ExperimentSession(self.experiment_id) as session:
                 sites = session.query(tm.Site.id, tm.Site.height, tm.Site.width, tm.Site.y, tm.Site.x).\
                  filter_by(well_id=well_id).all()
+                
+                sites_id = [i[0] for i  in sites] #list of site ids for this well  
+                
+                logger.debug(
+                    'well_id: %s has site_id: %s'
+                     , well_id, len(sites))
+ 
                 wellY = sites[0][1]*len(set([i[3] for i in sites]))
                 wellX = sites[0][2]*len(set([i[4]for i in sites]))
-
-
                 extract_mapobject_type_id = session.query(tm.MapobjectType.id).\
                 filter_by(name=batch['extract_object']).one()[0]
+
+                logger.debug(
+                    'id of %s is: %s '
+                    , batch['extract_object'], extract_mapobject_type_id)
+
                 extract_seg_layer_id = session.query(tm.SegmentationLayer.id).\
                 filter_by(mapobject_type_id=extract_mapobject_type_id).one()[0]
+
                 extract_centroids = session.query(tm.MapobjectSegmentation.geom_centroid,tm.MapobjectSegmentation.mapobject_id,tm.MapobjectSegmentation.label,tm.MapobjectSegmentation.partition_key).\
-                filter_by(segmentation_layer_id=extract_seg_layer_id).all()
+                filter(tm.MapobjectSegmentation.segmentation_layer_id==extract_seg_layer_id).\
+                filter(tm.MapobjectSegmentation.partition_key.in_(sites_id) ).all()
+                
+                logger.debug(
+                    'well_id: %s has %s sites and a total of %s centroids'
+                     , well_id, len(sites), len(extract_centroids))  
+
                 assign_mapobject_type_id = session.query(tm.MapobjectType.id).\
                 filter_by(name=batch['assign_object']).one()[0]
                 assign_seg_layer_id = session.query(tm.SegmentationLayer.id).\
                 filter_by(mapobject_type_id=assign_mapobject_type_id).one()[0]
                 assign_centroids = session.query(tm.MapobjectSegmentation.geom_centroid,tm.MapobjectSegmentation.mapobject_id,tm.MapobjectSegmentation.label,tm.MapobjectSegmentation.partition_key).\
-                filter_by(segmentation_layer_id=assign_seg_layer_id).all()
+                filter(tm.MapobjectSegmentation.segmentation_layer_id==assign_seg_layer_id).\
+                filter(tm.MapobjectSegmentation.partition_key.in_(sites_id) ).all()
 
                 logger.info('Calculating LCC for well_id %s', well_id)
                 logger.info('Instantiating LCC for extract_object')
